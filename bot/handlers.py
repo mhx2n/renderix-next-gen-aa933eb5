@@ -1519,6 +1519,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("key",   cmd_key))
     app.add_handler(CommandHandler("tryke", cmd_tryke))
     app.add_handler(CommandHandler("dl",    cmd_dl))
+    app.add_handler(CommandHandler("dla",   cmd_dla))
 
     for k in list(REGISTRY.keys()):
         app.add_handler(CommandHandler(k, make_provider_handler(k)))
