@@ -37,16 +37,6 @@ async def _amain():
     await init_db()
     stop = asyncio.Event()
 
-    def _polling_error_callback(exc):
-        if isinstance(exc, Conflict):
-            log.critical(
-                "Telegram polling conflict detected: another bot instance is already using getUpdates. "
-                "Stopping this instance to avoid endless crash loops."
-            )
-            stop.set()
-            return
-        log.exception("Polling error: %s", exc)
-
     async def _startup_error(stage: str, exc: Exception):
         tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[:1800]
         log.error("Startup failure during %s: %s", stage, exc)
@@ -61,6 +51,17 @@ async def _amain():
         .concurrent_updates(True)   # multi-user concurrency
         .build()
     )
+
+    def _polling_error_callback(exc):
+        if isinstance(exc, Conflict):
+            log.critical(
+                "Telegram polling conflict detected: another bot instance is already using getUpdates. "
+                "Stopping this instance to avoid endless crash loops."
+            )
+            stop.set()
+            return
+        log.error("Polling error routed to application handler: %s", exc)
+        app.create_task(app.process_error(update=None, error=exc))
     # Populate custom providers in REGISTRY BEFORE wiring handlers so each
     # custom provider gets its own /command and .alias automatically.
     await load_custom_providers(None)
