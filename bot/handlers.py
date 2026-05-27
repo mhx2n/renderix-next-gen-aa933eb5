@@ -171,17 +171,68 @@ async def _set_disabled(s: set):
     await db.set_setting("disabled_cmds", ",".join(sorted(s)))
 
 
+# ------- UI customization (owner-editable) -------
+DEFAULT_WELCOME = (
+    "<b>Welcome, {name}.</b>\n\n"
+    "Command-based bot.\n"
+    "• AI only works with commands like /g, /pr, /co\n"
+    "• Downloader only supports Facebook, Instagram, TikTok\n"
+    "• Plain text messages do nothing\n\n"
+    "Tap a button below to see commands."
+)
+
+
+async def _get_json_setting(key: str, default):
+    raw = await db.get_setting(key, "")
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except Exception:
+        return default
+
+
+async def _set_json_setting(key: str, value):
+    await db.set_setting(key, json.dumps(value, ensure_ascii=False))
+
+
+async def get_ui_labels() -> dict:
+    return await _get_json_setting("ui_labels", {})
+
+
+async def get_ui_emojis() -> dict:
+    return await _get_json_setting("ui_emojis", {})
+
+
+async def get_ui_cat_labels() -> dict:
+    return await _get_json_setting("ui_cat_labels", {})
+
+
+async def get_ui_row_width() -> int:
+    try:
+        return max(1, min(3, int(await db.get_setting("ui_row_width", "2") or "2")))
+    except Exception:
+        return 2
+
+
+async def get_ui_welcome() -> str:
+    return (await db.get_setting("ui_welcome", "")) or DEFAULT_WELCOME
+
+
 # ============================================================
 # Main menus (inline keyboards)
 # ============================================================
 async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
     disabled = await _disabled_set()
+    cat_labels = await get_ui_cat_labels()
+    width = await get_ui_row_width()
     rows, row = [], []
     for cat, items in TOOL_CATALOG.items():
         if not any(c not in disabled for c, _, _ in items):
             continue
-        row.append(InlineKeyboardButton(cat, callback_data=f"cat:{cat}"))
-        if len(row) == 2:
+        label = cat_labels.get(cat, cat)
+        row.append(InlineKeyboardButton(label, callback_data=f"cat:{cat}"))
+        if len(row) == width:
             rows.append(row); row = []
     if row: rows.append(row)
     if is_owner(uid):
@@ -191,12 +242,17 @@ async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
 
 async def category_kb(cat: str) -> InlineKeyboardMarkup:
     disabled = await _disabled_set()
+    labels = await get_ui_labels()
+    emojis = await get_ui_emojis()
+    width = await get_ui_row_width()
     rows, row = [], []
     for cmd, label, _doc in TOOL_CATALOG.get(cat, []):
         if cmd in disabled:
             continue
-        row.append(InlineKeyboardButton(label, callback_data=f"tool:{cmd}"))
-        if len(row) == 2:
+        em = emojis.get(cmd, "")
+        display = (f"{em} {labels.get(cmd, label)}" if em else labels.get(cmd, label)).strip()
+        row.append(InlineKeyboardButton(display, callback_data=f"tool:{cmd}"))
+        if len(row) == width:
             rows.append(row); row = []
     if row: rows.append(row)
     rows.append([InlineKeyboardButton("« Back to Main Menu", callback_data="m:home")])
