@@ -27,6 +27,7 @@ from .tools import textenc as _textenc, language as _language, photo as _photo, 
 
 _HISTORY: dict = defaultdict(list)
 _PENDING_KEY: dict = {}     # user_id -> last inspected api key
+_PENDING_KIND: dict = {}    # user_id -> resolved provider kind ("openai", "cohere", ...)
 _AWAIT_INPUT: dict = {}     # user_id -> ("key"|"download"|"tryke"|"announce"|"speak_to"|"grant"|"revoke")
 _DOWNLOAD_SEM = asyncio.Semaphore(1)  # keep free hosting stable: one download at a time
 _DOWNLOAD_QUEUE = 0
@@ -585,6 +586,11 @@ async def _do_inspect(update: Update, key: str):
                 f"Detail: <code>{escape_html(json.dumps(info.get('error'))[:500])}</code>")
             return
         _PENDING_KEY[update.effective_user.id] = key
+        # cache the resolved provider kind so /addmodel doesn't re-detect
+        try:
+            _PENDING_KIND[update.effective_user.id] = (info.get("kind") or "").lower()
+        except Exception:
+            pass
         models = info.get("models", [])
         limits = info.get("limits", {})
         lines = [
@@ -1126,6 +1132,10 @@ _PROVIDER_BASE_URLS = {
     "xai":        "https://api.x.ai/v1",
     "together":   "https://api.together.xyz/v1",
     "cohere":     "https://api.cohere.com/compatibility/v1",
+    "mistral":    "https://api.mistral.ai/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "fireworks":  "https://api.fireworks.ai/inference/v1",
+    "nvidia":     "https://integrate.api.nvidia.com/v1",
 }
 
 
@@ -1164,13 +1174,29 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    from .keycheck import _detect
-    kind = _detect(key)
+    from .keycheck import _detect, inspect_key
+    kind = (_PENDING_KIND.get(uid) or "").lower()
+    if not kind or kind not in _PROVIDER_BASE_URLS:
+        # detection fallback: prefix sniff
+        guess = _detect(key)
+        if guess in _PROVIDER_BASE_URLS:
+            kind = guess
+        else:
+            # last resort: live probe via inspect_key (handles ambiguous_sk / unknown)
+            try:
+                info = await inspect_key(key)
+                if info.get("valid"):
+                    kind = (info.get("kind") or "").lower()
+                    _PENDING_KIND[uid] = kind
+            except Exception:
+                pass
     base_url = _PROVIDER_BASE_URLS.get(kind)
     if not base_url:
         await update.effective_message.reply_text(
-            f"This key type ({kind}) is not yet supported for custom providers.\n"
-            "Supported: OpenAI, Groq, OpenRouter, DeepSeek, xAI, Together AI, Cohere."
+            "Couldn't auto-detect this key's provider. Run /key again with the key, "
+            "then retry /addmodel.\n"
+            "Supported: OpenAI, Groq, OpenRouter, DeepSeek, xAI, Together AI, Cohere, "
+            "Mistral, Perplexity, Fireworks, NVIDIA."
         )
         return
 

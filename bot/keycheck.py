@@ -37,50 +37,50 @@ async def _openai(session, key):
     s, models, h = await _fetch_json(session, "GET", "https://api.openai.com/v1/models",
                                      headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "OpenAI", "valid": False, "status": s, "error": models}
+        return {"provider": "OpenAI", "kind": "openai", "valid": False, "status": s, "error": models}
     ids = [m["id"] for m in models.get("data", [])][:50]
     limits = {k: v for k, v in h.items() if "ratelimit" in k.lower() or "x-request-id" == k.lower()}
-    return {"provider": "OpenAI", "valid": True, "models": ids, "limits": limits}
+    return {"provider": "OpenAI", "kind": "openai", "valid": True, "models": ids, "limits": limits}
 
 
 async def _anthropic(session, key):
     s, data, h = await _fetch_json(session, "GET", "https://api.anthropic.com/v1/models",
                                    headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
     if s != 200:
-        return {"provider": "Anthropic", "valid": False, "status": s, "error": data}
+        return {"provider": "Anthropic", "kind": "anthropic", "valid": False, "status": s, "error": data}
     ids = [m["id"] for m in data.get("data", [])]
-    return {"provider": "Anthropic", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "Anthropic", "kind": "anthropic", "valid": True, "models": ids, "limits": {}}
 
 
 async def _gemini(session, key):
     s, data, _ = await _fetch_json(session, "GET",
                                    f"https://generativelanguage.googleapis.com/v1beta/models?key={key}")
     if s != 200:
-        return {"provider": "Google Gemini", "valid": False, "status": s, "error": data}
+        return {"provider": "Google Gemini", "kind": "gemini", "valid": False, "status": s, "error": data}
     ids = [m["name"].replace("models/", "") for m in data.get("models", [])][:60]
-    return {"provider": "Google Gemini", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "Google Gemini", "kind": "gemini", "valid": True, "models": ids, "limits": {}}
 
 
 async def _groq(session, key):
     s, data, h = await _fetch_json(session, "GET", "https://api.groq.com/openai/v1/models",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "Groq", "valid": False, "status": s, "error": data}
+        return {"provider": "Groq", "kind": "groq", "valid": False, "status": s, "error": data}
     ids = [m["id"] for m in data.get("data", [])]
-    return {"provider": "Groq", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "Groq", "kind": "groq", "valid": True, "models": ids, "limits": {}}
 
 
 async def _openrouter(session, key):
     s, data, _ = await _fetch_json(session, "GET", "https://openrouter.ai/api/v1/auth/key",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "OpenRouter", "valid": False, "status": s, "error": data}
+        return {"provider": "OpenRouter", "kind": "openrouter", "valid": False, "status": s, "error": data}
     d = data.get("data", {})
     s2, models, _ = await _fetch_json(session, "GET", "https://openrouter.ai/api/v1/models",
                                       headers={"Authorization": f"Bearer {key}"})
     ids = [m["id"] for m in (models.get("data", []) if isinstance(models, dict) else [])][:80]
     return {
-        "provider": "OpenRouter", "valid": True, "models": ids,
+        "provider": "OpenRouter", "kind": "openrouter", "valid": True, "models": ids,
         "limits": {
             "label": d.get("label"),
             "limit": d.get("limit"),
@@ -96,39 +96,39 @@ async def _cohere(session, key):
     s, data, _ = await _fetch_json(session, "GET", "https://api.cohere.com/v1/models",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "Cohere", "valid": False, "status": s, "error": data}
+        return {"provider": "Cohere", "kind": "cohere", "valid": False, "status": s, "error": data}
     ids = [m["name"] for m in data.get("models", [])]
-    return {"provider": "Cohere", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "Cohere", "kind": "cohere", "valid": True, "models": ids, "limits": {}}
 
 
 async def _deepseek(session, key):
     s, data, _ = await _fetch_json(session, "GET", "https://api.deepseek.com/v1/models",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "DeepSeek", "valid": False, "status": s, "error": data}
+        return {"provider": "DeepSeek", "kind": "deepseek", "valid": False, "status": s, "error": data}
     ids = [m["id"] for m in data.get("data", [])]
     bal_s, bal, _ = await _fetch_json(session, "GET", "https://api.deepseek.com/user/balance",
                                       headers={"Authorization": f"Bearer {key}"})
     limits = bal if bal_s == 200 else {}
-    return {"provider": "DeepSeek", "valid": True, "models": ids, "limits": limits}
+    return {"provider": "DeepSeek", "kind": "deepseek", "valid": True, "models": ids, "limits": limits}
 
 
 async def _xai(session, key):
     s, data, _ = await _fetch_json(session, "GET", "https://api.x.ai/v1/models",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "xAI", "valid": False, "status": s, "error": data}
+        return {"provider": "xAI", "kind": "xai", "valid": False, "status": s, "error": data}
     ids = [m["id"] for m in data.get("data", [])]
-    return {"provider": "xAI", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "xAI", "kind": "xai", "valid": True, "models": ids, "limits": {}}
 
 
 async def _together(session, key):
     s, data, _ = await _fetch_json(session, "GET", "https://api.together.xyz/v1/models",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "Together AI", "valid": False, "status": s, "error": data}
+        return {"provider": "Together AI", "kind": "together", "valid": False, "status": s, "error": data}
     ids = [m["id"] for m in (data if isinstance(data, list) else data.get("data", []))][:80]
-    return {"provider": "Together AI", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "Together AI", "kind": "together", "valid": True, "models": ids, "limits": {}}
 
 
 _HANDLERS = {
@@ -142,9 +142,9 @@ async def _mistral(session, key):
     s, data, _ = await _fetch_json(session, "GET", "https://api.mistral.ai/v1/models",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "Mistral", "valid": False, "status": s, "error": data}
+        return {"provider": "Mistral", "kind": "mistral", "valid": False, "status": s, "error": data}
     ids = [m["id"] for m in data.get("data", [])]
-    return {"provider": "Mistral", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "Mistral", "kind": "mistral", "valid": True, "models": ids, "limits": {}}
 
 
 async def _perplexity(session, key):
@@ -153,8 +153,8 @@ async def _perplexity(session, key):
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json={"model": "sonar", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1})
     if s not in (200, 400):
-        return {"provider": "Perplexity", "valid": False, "status": s, "error": data}
-    return {"provider": "Perplexity", "valid": True,
+        return {"provider": "Perplexity", "kind": "perplexity", "valid": False, "status": s, "error": data}
+    return {"provider": "Perplexity", "kind": "perplexity", "valid": True,
             "models": ["sonar", "sonar-pro", "sonar-reasoning"], "limits": {}}
 
 
@@ -162,18 +162,18 @@ async def _fireworks(session, key):
     s, data, _ = await _fetch_json(session, "GET", "https://api.fireworks.ai/inference/v1/models",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "Fireworks", "valid": False, "status": s, "error": data}
+        return {"provider": "Fireworks", "kind": "fireworks", "valid": False, "status": s, "error": data}
     ids = [m["id"] for m in (data.get("data", []) if isinstance(data, dict) else [])][:80]
-    return {"provider": "Fireworks", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "Fireworks", "kind": "fireworks", "valid": True, "models": ids, "limits": {}}
 
 
 async def _nvidia(session, key):
     s, data, _ = await _fetch_json(session, "GET", "https://integrate.api.nvidia.com/v1/models",
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
-        return {"provider": "NVIDIA NIM", "valid": False, "status": s, "error": data}
+        return {"provider": "NVIDIA NIM", "kind": "nvidia", "valid": False, "status": s, "error": data}
     ids = [m["id"] for m in data.get("data", [])][:80]
-    return {"provider": "NVIDIA NIM", "valid": True, "models": ids, "limits": {}}
+    return {"provider": "NVIDIA NIM", "kind": "nvidia", "valid": True, "models": ids, "limits": {}}
 
 
 _HANDLERS["mistral"] = _mistral
