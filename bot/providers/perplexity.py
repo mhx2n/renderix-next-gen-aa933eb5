@@ -1,6 +1,7 @@
 """Perplexity scrape provider. Adapted from user's prplexity.py."""
 import asyncio
 import json
+import os
 import re
 import time
 import uuid
@@ -68,6 +69,7 @@ def _parse(text: str) -> str:
 
 def _ask_sync(prompt: str) -> str:
     sc = _scrape()
+    current_time = sc["ts"]
     payload = {
         "params": {
             "last_backend_uuid": str(uuid.uuid4()),
@@ -80,7 +82,16 @@ def _ask_sync(prompt: str) -> str:
             "query_source": "followup", "is_incognito": False,
             "local_search_enabled": False, "use_schematized_api": True,
             "send_back_text_in_streaming_api": False,
-            "supported_block_use_cases": ["answer_modes", "media_items"],
+            "supported_block_use_cases": [
+                "answer_modes", "media_items", "knowledge_cards", "inline_entity_cards",
+                "place_widgets", "finance_widgets", "prediction_market_widgets",
+                "sports_widgets", "flight_status_widgets", "news_widgets",
+                "shopping_widgets", "jobs_widgets", "search_result_widgets",
+                "inline_images", "inline_assets", "placeholder_cards", "diff_blocks",
+                "inline_knowledge_cards", "entity_group_v2", "refinement_filters",
+                "canvas_mode", "maps_preview", "answer_tabs", "price_comparison_widgets",
+                "preserve_latex", "in_context_suggestions",
+            ],
             "client_coordinates": None, "mentions": [],
             "skip_search_enabled": True, "is_nav_suggestions_disabled": False,
             "followup_source": "link", "source": "mweb",
@@ -94,19 +105,50 @@ def _ask_sync(prompt: str) -> str:
     extra = {
         "pplx.visitor-id": sc["visitor"], "pplx.session-id": sc["sid"],
         "next-auth.csrf-token": sc["csrf"], "pplx.mweb-splash-page-dismissed": "true",
+        "next-auth.callback-url": "https%3A%2F%2Fwww.perplexity.ai%2Fapi%2Fauth%2Fsignin-callback%3Fredirect%3Dhttps%253A%252F%252Fwww.perplexity.ai",
         "pplx.la-status": "allowed",
+        "__ps_r": "_",
+        "__ps_sr": "_",
+        "__ps_fva": str(current_time * 1000),
+        "_fbp": f"fb.1.{current_time}.{uuid.uuid4().hex}",
+        "pplx.metadata": json.dumps({
+            "qc": 2, "qcu": 0, "qcm": 0, "qcc": 0, "qcco": 0, "qccol": 0,
+            "qcdr": 0, "qcs": 0, "qcd": 0, "hli": False, "hcga": False,
+            "hcds": False, "hso": False, "hfo": False, "hsco": False,
+            "hfco": False, "hsma": False, "hdc": False,
+            "fqa": current_time * 1000, "lqa": current_time * 1000,
+        }),
     }
     cookies = {**sc["cookies"], **extra}
     headers = {
         "User-Agent": "Mozilla/5.0 (Linux; Android 10; Redmi 8A) AppleWebKit/537.36 Chrome/143.0.7499.34 Mobile Safari/537.36",
-        "Accept": "text/event-stream", "Content-Type": "application/json",
+        "Accept": "text/event-stream", "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Content-Type": "application/json",
         "x-request-id": str(uuid.uuid4()),
+        "sec-ch-ua-platform": '"Android"',
+        "sec-ch-ua": '"Android WebView";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+        "sec-ch-ua-mobile": "?1",
+        "x-perplexity-request-reason": "perplexity-query-state-provider",
+        "x-requested-with": "mark.via.gp",
         "Origin": "https://www.perplexity.ai",
-        "Referer": "https://www.perplexity.ai/",
+        "Referer": "https://www.perplexity.ai/search/hi-lMwqBQEoQRKoNpRoTe6QRA",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+        "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+        "priority": "u=1, i",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
+    if sc["csrf"]:
+        headers["x-csrf-token"] = sc["csrf"]
+    delay = float(os.getenv("PERPLEXITY_REQUEST_DELAY", "0.5") or 0.5)
+    if delay > 0:
+        time.sleep(delay)
     r = sc["session"].post(sc["api_url"], json=payload, headers=headers, cookies=cookies, timeout=120)
     if r.status_code != 200:
-        raise RuntimeError(f"Perplexity HTTP {r.status_code}")
+        body = (r.text or "")[:240]
+        raise RuntimeError(f"Perplexity HTTP {r.status_code}: {body}")
     ans = _parse(r.text)
     if not ans:
         raise RuntimeError("Empty response from Perplexity")
