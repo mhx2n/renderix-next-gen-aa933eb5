@@ -133,7 +133,10 @@ def _extract_share_target(url: str) -> str:
             allow_redirects=True,
         )
         final_url = (resp.url or "").strip()
-        if final_url.startswith("http"):
+        content_type = (resp.headers.get("content-type") or "").lower()
+        if resp.status_code < 400 and final_url.startswith("http") and "text/html" not in content_type:
+            return final_url
+        if resp.status_code < 400 and final_url.startswith("http") and final_url != normalized:
             return final_url
     except Exception:
         pass
@@ -325,11 +328,13 @@ def _ydl_base(url: str) -> dict:
 # Format ladder (descending preference). Each tier stays under MAX_BYTES.
 _FORMAT_LADDER = [
     # Tier 1: best compact mp4 under cap
-    f"bv*[ext=mp4][filesize<{MAX_BYTES}]+ba[ext=m4a]/"
-    f"b[ext=mp4][filesize<{MAX_BYTES}]",
+    f"bv*[ext=mp4][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]"
+    f"+ba[ext=m4a][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]/"
+    f"b[ext=mp4][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
     # Tier 2: any combo under cap
-    f"bv*[filesize<{MAX_BYTES}]+ba/"
-    f"b[filesize<{MAX_BYTES}]",
+    f"bv*[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]"
+    f"+ba[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]/"
+    f"b[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
     # Tier 3: capped height
     "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/"
     "bv*[height<=720]+ba/b[height<=720]",
@@ -343,7 +348,8 @@ _FORMAT_LADDER = [
 
 # Audio-only ladder
 _AUDIO_LADDER = [
-    f"ba[ext=m4a][filesize<{MAX_BYTES}]/ba[filesize<{MAX_BYTES}]",
+    f"ba[ext=m4a][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]/"
+    f"ba[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
     "bestaudio[ext=m4a]/bestaudio/best",
     "best",
 ]
@@ -488,8 +494,8 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
         opts = _ydl_base(url)
         opts["outtmpl"] = outtmpl
         opts["format"] = fmt
-        opts["format_sort"] = ["+size", "+br", "+res", "+fps"]
-        opts["max_filesize"] = MAX_BYTES
+        if tier_idx < max(0, len(ladder) - 2):
+            opts["max_filesize"] = MAX_BYTES
         if hook:
             opts["progress_hooks"] = [hook]
         if audio_only:
