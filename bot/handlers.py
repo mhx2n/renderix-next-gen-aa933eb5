@@ -1075,6 +1075,12 @@ async def cmd_delprovider(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cmd = context.args[0].lower().strip()
     REGISTRY.pop(cmd, None)
     await db.remove_custom_provider(cmd)
+    # Also remove the AI Tools button so it disappears from the menu.
+    try:
+        ai_items = TOOL_CATALOG.get("AI Tools", [])
+        ai_items[:] = [t for t in ai_items if t[0] != cmd]
+    except Exception:
+        pass
     await setup_bot_commands(context.application)
     await update.effective_message.reply_text(f"Provider removed: {cmd}")
 
