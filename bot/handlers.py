@@ -695,6 +695,14 @@ async def load_custom_providers(app: Application | None = None):
         register_provider(cmd, name, make_openai_compatible_provider(name, base_url, api_key, model))
         if app:
             app.add_handler(CommandHandler(cmd, make_provider_handler(cmd)))
+        # Also expose as a button in the AI Tools section of the main panel.
+        doc = (
+            f"Chat with {name}.\n\n<b>Usage:</b>\n"
+            f"<code>/{cmd} your question</code>  or  <code>.{cmd} your question</code>"
+        )
+        ai_items = TOOL_CATALOG["AI Tools"]
+        ai_items[:] = [t for t in ai_items if t[0] != cmd]
+        ai_items.append((cmd, name, doc))
 
 
 async def cmd_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
