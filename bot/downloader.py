@@ -27,10 +27,8 @@ import yt_dlp
 MAX_BYTES = 49 * 1024 * 1024
 
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-SUPPORTED_HOSTS = (
-    "youtube.com", "youtu.be", "facebook.com", "fb.watch",
-    "instagram.com", "tiktok.com", "vt.tiktok.com", "twitter.com", "x.com",
-)
+# We rely on yt-dlp's 1000+ supported sites. Any http(s) URL is accepted;
+# yt-dlp will reject truly unsupported ones with a clear error.
 
 _UA_IOS = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
@@ -53,11 +51,9 @@ def detect_url(text: str) -> Optional[str]:
         return None
     url = m.group(0).rstrip(").,]>")
     host = (urlparse(url).netloc or "").lower()
-    if host.startswith("www."):
-        host = host[4:]
-    if any(host == h or host.endswith(f".{h}") for h in SUPPORTED_HOSTS):
-        return url
-    return None
+    if not host:
+        return None
+    return url
 
 
 def _cookies_path() -> Optional[str]:
@@ -164,6 +160,12 @@ _FORMAT_LADDER = [
     "bv*+ba/b",
 ]
 
+# Audio-only ladder
+_AUDIO_LADDER = [
+    f"ba[ext=m4a][filesize<{MAX_BYTES}]/ba[filesize<{MAX_BYTES}]",
+    "bestaudio[ext=m4a]/bestaudio/best",
+]
+
 
 def _make_progress_hook(cb: Optional[Callable[[dict], None]]):
     if not cb:
@@ -211,9 +213,77 @@ def _pick_best_size(info: dict) -> int:
     return best
 
 
-def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None) -> dict:
+def _tikwm_download(url: str, workdir: str, audio_only: bool) -> Optional[dict]:
+    """Reliable TikTok fallback via the public tikwm.com endpoint.
+    Returns info dict on success, None on failure.
+    """
+    try:
+        r = requests.post(
+            "https://www.tikwm.com/api/",
+            data={"url": url, "hd": "1"},
+            headers={"User-Agent": _UA_DESKTOP},
+            timeout=25,
+        )
+        j = r.json()
+        if r.status_code != 200 or j.get("code") != 0:
+            return None
+        d = j.get("data") or {}
+        if audio_only:
+            media = d.get("music")
+            ext = "mp3"
+        else:
+            media = d.get("hdplay") or d.get("play") or d.get("wmplay")
+            ext = "mp4"
+        if not media:
+            return None
+        if media.startswith("/"):
+            media = "https://www.tikwm.com" + media
+        path = os.path.join(workdir, f"tiktok_{int(time.time())}.{ext}")
+        with requests.get(media, stream=True, timeout=120,
+                          headers={"User-Agent": _UA_DESKTOP,
+                                   "Referer": "https://www.tikwm.com/"}) as resp:
+            resp.raise_for_status()
+            total = 0
+            with open(path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=1 << 15):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    total += len(chunk)
+                    if total > MAX_BYTES:
+                        f.close()
+                        os.remove(path)
+                        return None
+        size = os.path.getsize(path)
+        if size == 0:
+            os.remove(path)
+            return None
+        return {
+            "path": path,
+            "size": size,
+            "title": (d.get("title") or "TikTok")[:200],
+            "uploader": ((d.get("author") or {}).get("nickname") or "TikTok"),
+            "duration": int(d.get("duration") or 0),
+            "ext": ext,
+            "thumbnail": d.get("cover"),
+            "webpage_url": url,
+            "audio_only": audio_only,
+        }
+    except Exception:
+        return None
+
+
+def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
+                   audio_only: bool = False) -> dict:
     url = _normalize_url(url)
     outtmpl = os.path.join(workdir, "%(id).40s.%(ext)s")
+    platform = platform_from_url(url)
+
+    # TikTok: try tikwm.com first — it bypasses most yt-dlp issues.
+    if platform == "tiktok":
+        tik = _tikwm_download(url, workdir, audio_only)
+        if tik:
+            return tik
 
     # Pre-flight probe (non-fatal if it fails — some sites block extraction-only).
     try:
@@ -229,8 +299,9 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None) 
 
     last_err: Optional[Exception] = None
     hook = _make_progress_hook(progress)
+    ladder = _AUDIO_LADDER if audio_only else _FORMAT_LADDER
 
-    for tier_idx, fmt in enumerate(_FORMAT_LADDER):
+    for tier_idx, fmt in enumerate(ladder):
         opts = _ydl_base(url)
         opts["outtmpl"] = outtmpl
         opts["format"] = fmt
@@ -238,6 +309,12 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None) 
         opts["max_filesize"] = MAX_BYTES
         if hook:
             opts["progress_hooks"] = [hook]
+        if audio_only:
+            opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }]
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -246,7 +323,7 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None) 
                 path = ydl.prepare_filename(info)
                 if not os.path.exists(path):
                     base, _ = os.path.splitext(path)
-                    for ext in (".mp4", ".mkv", ".webm", ".mov", ".m4a", ".mp3"):
+                    for ext in (".mp3", ".m4a", ".mp4", ".mkv", ".webm", ".mov", ".opus", ".ogg"):
                         if os.path.exists(base + ext):
                             path = base + ext
                             break
@@ -272,6 +349,7 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None) 
                     "ext": os.path.splitext(path)[1].lstrip("."),
                     "thumbnail": info.get("thumbnail"),
                     "webpage_url": info.get("webpage_url") or url,
+                    "audio_only": audio_only,
                 }
         except yt_dlp.utils.DownloadError as e:
             last_err = e
@@ -288,17 +366,23 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None) 
             last_err = e
             continue
 
-    platform = platform_from_url(url)
+    # TikTok: last-ditch fallback to tikwm if yt-dlp failed completely.
+    if platform == "tiktok":
+        tik = _tikwm_download(url, workdir, audio_only)
+        if tik:
+            return tik
+
     if last_err:
         raise RuntimeError(f"[{platform}] {last_err}")
     raise RuntimeError(f"[{platform}] Download failed after all fallbacks.")
 
 
-async def download(url: str, progress: Optional[Callable] = None) -> dict:
-    """Download a video. Returns dict with path/size/title or raises."""
+async def download(url: str, progress: Optional[Callable] = None,
+                   audio_only: bool = False) -> dict:
+    """Download a video or audio. Returns dict with path/size/title or raises."""
     workdir = tempfile.mkdtemp(prefix="dl_")
     try:
-        info = await asyncio.to_thread(_sync_download, url, workdir, progress)
+        info = await asyncio.to_thread(_sync_download, url, workdir, progress, audio_only)
         if info["size"] > MAX_BYTES:
             try: os.remove(info["path"])
             except Exception: pass

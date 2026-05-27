@@ -152,6 +152,7 @@ TOOL_CATALOG: dict = {
     ],
     "Utilities": [
         ("dl",    "Video Downloader","Download from YouTube, Facebook, Instagram, TikTok, 1000+ sites (max 50MB).\n\n<b>Usage:</b> <code>/dl &lt;url&gt;</code> or just send the URL."),
+        ("dla",   "Audio Downloader","Extract audio (mp3) from any supported video link.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
         ("short", "URL Shortener","Shorten any URL.\n\n<b>Usage:</b>\n<code>/short https://example.com/path</code>"),
         ("ping",  "Ping",         "Bot latency check.\n\n<b>Usage:</b> <code>/ping</code>"),
         ("help",  "Help / About", "AI-summarised help.\n\n<b>Usage:</b>\n<code>/help</code> or <code>/help &lt;topic&gt;</code>"),
@@ -540,9 +541,26 @@ async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _run_download(update, context, url)
 
 
-async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+async def cmd_dla(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Audio-only download."""
+    if not await force_join_ok(update, context): return
+    text = " ".join(context.args).strip()
+    url = downloader.detect_url(text) or text
+    if not url or not url.startswith("http"):
+        await update.effective_message.reply_text(
+            "Usage: /dla <url>  — downloads the audio track only."
+        )
+        return
+    await _run_download(update, context, url, audio_only=True)
+
+
+async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                        url: str, audio_only: bool = False):
     chat_id = update.effective_chat.id
-    status = await update.effective_message.reply_text("Queued. Preparing download...")
+    kind = "audio" if audio_only else "video"
+    status = await update.effective_message.reply_text(
+        f"Queued. Preparing {kind} download…"
+    )
     info = None
     loop = asyncio.get_running_loop()
     last_edit = {"t": 0.0, "text": ""}
@@ -580,9 +598,13 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url:
 
     try:
         async with _DOWNLOAD_SEM:
-            await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
+            await context.bot.send_chat_action(
+                chat_id,
+                ChatAction.UPLOAD_VOICE if audio_only else ChatAction.UPLOAD_VIDEO,
+            )
             info = await asyncio.wait_for(
-                downloader.download(url, progress=_on_progress), timeout=420,
+                downloader.download(url, progress=_on_progress, audio_only=audio_only),
+                timeout=420,
             )
             try:
                 await status.edit_text(f"Uploading ({human_size(info['size'])})…")
@@ -591,12 +613,21 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url:
                 f"{info['title'] or 'Video'}\n{info['uploader']} • {human_size(info['size'])}"
             )[:900]
             with open(info["path"], "rb") as f:
-                await context.bot.send_video(
-                    chat_id=chat_id, video=f, caption=caption,
-                    supports_streaming=True,
-                    duration=info.get("duration") or None,
-                    write_timeout=240, read_timeout=240,
-                )
+                if info.get("audio_only"):
+                    await context.bot.send_audio(
+                        chat_id=chat_id, audio=f, caption=caption,
+                        title=info.get("title") or None,
+                        performer=info.get("uploader") or None,
+                        duration=info.get("duration") or None,
+                        write_timeout=240, read_timeout=240,
+                    )
+                else:
+                    await context.bot.send_video(
+                        chat_id=chat_id, video=f, caption=caption,
+                        supports_streaming=True,
+                        duration=info.get("duration") or None,
+                        write_timeout=240, read_timeout=240,
+                    )
             try: await status.delete()
             except Exception: pass
         await db.log("INFO", update.effective_user.id, "dl", url[:200])
@@ -639,8 +670,13 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = await db.stats()
     ch = await db.get_setting("force_join", FORCE_JOIN_CHANNEL or "(none)")
     live = await db.get_setting("live_response", "on")
+    pm = process_metrics(_PROCESS_STARTED_AT)
     await send_md(update.effective_message,
         f"*Bot Status*\n"
+        f"• Uptime: `{format_duration(pm['uptime_s'])}`\n"
+        f"• Memory (RSS): `{human_size(pm['rss_bytes'])}`\n"
+        f"• CPU load (1/5/15m): `{pm['load_1']:.2f} / {pm['load_5']:.2f} / {pm['load_15']:.2f}`\n"
+        f"• CPU cores: `{pm['cpu_count']}`\n"
         f"• Users: `{s['users']}`\n"
         f"• Banned: `{s['banned']}`\n"
         f"• Messages: `{s['messages']}`\n"
@@ -1102,6 +1138,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _AWAIT_INPUT[uid] = ("download", None)
         await q.edit_message_text("Send the video URL now.", reply_markup=back_home_kb()); return
 
+    if data.startswith("dlx:"):
+        try:
+            _, kind, token = data.split(":", 2)
+        except ValueError:
+            return
+        urls = context.application.bot_data.get("dl_urls", {})
+        url = urls.pop(token, None)
+        if not url:
+            await q.edit_message_text("This link expired. Send it again."); return
+        await q.edit_message_text(f"Starting {('audio' if kind=='a' else 'video')} download…")
+        await _run_download(update, context, url, audio_only=(kind == "a"))
+        return
+
     # Owner sub-actions
     if data.startswith("ow:"):
         if not is_owner(uid): return
@@ -1110,8 +1159,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             s = await db.stats()
             ch = await db.get_setting("force_join", FORCE_JOIN_CHANNEL or "(none)")
             live = await db.get_setting("live_response", "on")
+            pm = process_metrics(_PROCESS_STARTED_AT)
             await q.edit_message_text(
-                f"*Stats*\nUsers: `{s['users']}` | Banned: `{s['banned']}`\n"
+                f"*Stats*\n"
+                f"Uptime: `{format_duration(pm['uptime_s'])}`\n"
+                f"RAM: `{human_size(pm['rss_bytes'])}` | "
+                f"Load: `{pm['load_1']:.2f}/{pm['load_5']:.2f}/{pm['load_15']:.2f}` "
+                f"({pm['cpu_count']} cores)\n"
+                f"Users: `{s['users']}` | Banned: `{s['banned']}`\n"
                 f"Messages: `{s['messages']}` | Errors: `{s['errors']}`\n"
                 f"Channel: `{ch}` | Live: `{live}`",
                 parse_mode=ParseMode.MARKDOWN, reply_markup=owner_kb())
@@ -1244,7 +1299,18 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 3) Auto-detect video URLs and offer download
     url = downloader.detect_url(text)
     if url and not text.startswith(("/", ".")):
-        await _run_download(update, context, url); return
+        # Offer video/audio choice via inline buttons.
+        token = uuid4().hex[:10]
+        context.application.bot_data.setdefault("dl_urls", {})[token] = url
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🎬 Video", callback_data=f"dlx:v:{token}"),
+            InlineKeyboardButton("🎵 Audio", callback_data=f"dlx:a:{token}"),
+        ]])
+        await msg.reply_text(
+            f"Detected a link. What do you want to download?\n<code>{escape_html(url[:200])}</code>",
+            parse_mode=ParseMode.HTML, reply_markup=kb,
+        )
+        return
 
     # 4) Reply-to-bot continuation
     if msg.reply_to_message and msg.reply_to_message.from_user \
@@ -1307,6 +1373,7 @@ USER_COMMANDS = [
     BotCommand("key",   "Inspect an API key"),
     BotCommand("tryke", "Try a model with last key"),
     BotCommand("dl",    "Download YT/FB/IG/TikTok video"),
+    BotCommand("dla",   "Download audio-only (mp3)"),
     BotCommand("en",    "Encode text (Base64/Hex/Binary/…)"),
     BotCommand("de",    "Decode text from any format"),
     BotCommand("text",  "Transform text case/reverse"),
@@ -1454,6 +1521,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("key",   cmd_key))
     app.add_handler(CommandHandler("tryke", cmd_tryke))
     app.add_handler(CommandHandler("dl",    cmd_dl))
+    app.add_handler(CommandHandler("dla",   cmd_dla))
 
     for k in list(REGISTRY.keys()):
         app.add_handler(CommandHandler(k, make_provider_handler(k)))
