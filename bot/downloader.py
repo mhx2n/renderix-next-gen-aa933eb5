@@ -15,6 +15,7 @@ import asyncio
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 from typing import Callable, Optional
@@ -86,24 +87,100 @@ def platform_from_url(url: str) -> str:
 
 def _normalize_url(url: str) -> str:
     low = (url or "").lower()
-    if "vt.tiktok.com/" not in low and "vm.tiktok.com/" not in low:
+    needs_expand = any([
+        "vt.tiktok.com/" in low,
+        "vm.tiktok.com/" in low,
+        "fb.watch/" in low,
+        "facebook.com/share/" in low,
+        "facebook.com/reel/" in low,
+        "instagram.com/share/" in low,
+    ])
+    if not needs_expand:
         return url
     try:
         resp = requests.get(
             url,
             headers={
                 "User-Agent": _UA_DESKTOP,
-                "Referer": "https://www.tiktok.com/",
+                "Referer": "https://www.google.com/",
             },
             timeout=15,
             allow_redirects=True,
         )
         final_url = (resp.url or "").strip()
-        if final_url and "tiktok.com/" in final_url.lower():
+        if final_url and final_url.startswith("http"):
             return final_url
     except Exception:
         pass
     return url
+
+
+def _run_ffmpeg(args: list[str], timeout: int = 240) -> None:
+    proc = subprocess.run(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+        check=False,
+    )
+    if proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", errors="ignore").strip()
+        raise RuntimeError(err or "ffmpeg failed")
+
+
+def _ensure_telegram_media(path: str, audio_only: bool) -> str:
+    """Convert/remux media to Telegram-friendly formats when needed."""
+    if not path or not os.path.exists(path):
+        return path
+
+    base, ext = os.path.splitext(path)
+    ext = ext.lower()
+
+    if audio_only:
+        if ext == ".mp3":
+            return path
+        target = base + ".mp3"
+        _run_ffmpeg([
+            "ffmpeg", "-y", "-i", path,
+            "-vn", "-c:a", "libmp3lame", "-b:a", "128k",
+            target,
+        ], timeout=180)
+    else:
+        if ext in {".mp4", ".m4v", ".mov"}:
+            try:
+                faststart = base + ".tg.mp4"
+                _run_ffmpeg([
+                    "ffmpeg", "-y", "-i", path,
+                    "-c", "copy", "-movflags", "+faststart",
+                    faststart,
+                ], timeout=180)
+                target = faststart
+            except Exception:
+                return path
+        else:
+            target = base + ".mp4"
+            _run_ffmpeg([
+                "ffmpeg", "-y", "-i", path,
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                target,
+            ], timeout=300)
+
+    if not os.path.exists(target):
+        return path
+    if os.path.getsize(target) > MAX_BYTES:
+        try:
+            os.remove(target)
+        except Exception:
+            pass
+        raise RuntimeError("Converted file is still too large for Telegram.")
+    try:
+        if os.path.abspath(target) != os.path.abspath(path):
+            os.remove(path)
+    except Exception:
+        pass
+    return target
 
 
 def _ydl_base(url: str) -> dict:
@@ -116,7 +193,7 @@ def _ydl_base(url: str) -> dict:
         "socket_timeout": 30,
         "nocheckcertificate": True,
         "geo_bypass": True,
-        "concurrent_fragment_downloads": 4,
+        "concurrent_fragment_downloads": 1,
         "merge_output_format": "mp4",
         "http_headers": {
             "User-Agent": _UA_DESKTOP,
@@ -329,6 +406,7 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
                             break
                 if not os.path.exists(path):
                     raise RuntimeError("Downloaded file vanished.")
+                path = _ensure_telegram_media(path, audio_only=audio_only)
                 size = os.path.getsize(path)
                 if size == 0:
                     raise RuntimeError("Empty download.")
@@ -408,8 +486,8 @@ def user_error_text(err: Exception) -> str:
     if ("sign in to confirm" in low or "confirm you" in low) and platform == "youtube":
         return (
             "YouTube is asking for sign-in verification on the server.\n"
-            "Please try a different public link, or ask the owner to refresh "
-            "the cookies file."
+            "Owner fix: export fresh YouTube cookies into youtube_cookies.txt "
+            "from a real browser session, then redeploy/restart the bot."
         )
     if platform == "tiktok":
         if "unable to extract webpage video data" in low or "empty media response" in low:
@@ -431,6 +509,8 @@ def user_error_text(err: Exception) -> str:
             "This video is too large for Telegram's 50 MB bot upload limit. "
             "Try a shorter clip or a lower-quality source."
         )
+    if "converted file is still too large" in low:
+        return "The video could be prepared, but it is still too large to send in Telegram."
     if "unable to extract" in low or "empty media response" in low:
         return "This link did not expose a downloadable video stream."
     if "timed out" in low or "timeout" in low:

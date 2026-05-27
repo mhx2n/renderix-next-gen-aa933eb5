@@ -84,3 +84,9 @@ menu button, and reply-to-continue all start working).
 - Output is sanitised: `#`, `*`, `_`, `~`, `` ` ``, `>`, `|`, LaTeX (`$...$`, `\(...\)`), and HTML tags are stripped before sending so Telegram displays clean text.
 - Long answers are auto-chunked into 4000-char messages.
 - All provider calls are wrapped with a 120 s timeout and exceptions are logged to the DB, not silently swallowed.
+
+## Downloader notes
+
+- Downloads now run one at a time to keep free hosting stable and avoid overload.
+- The bot normalizes short/share links (TikTok, Facebook, Instagram) before download and converts media to Telegram-friendly MP3/MP4 when needed.
+- Some YouTube links may still trigger server-side bot checks. To improve success rate, export fresh browser cookies into `youtube_cookies.txt` or set `YT_COOKIES_FILE` to a valid cookies file path, then restart/redeploy.
