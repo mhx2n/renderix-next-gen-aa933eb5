@@ -20,13 +20,16 @@ def _detect(key: str) -> str:
     k = key.strip()
     if k.startswith("sk-or-"): return "openrouter"
     if k.startswith("sk-ant-"): return "anthropic"
-    if k.startswith("sk-proj-") or k.startswith("sk-"): return "openai"
     if k.startswith("gsk_"): return "groq"
     if k.startswith("xai-"): return "xai"
     if k.startswith("AIza"): return "gemini"
-    if k.startswith("co-") or len(k) == 40: return "cohere"
-    if k.startswith("ds-") or "deepseek" in k.lower(): return "deepseek"
     if k.startswith("tgp_") or k.startswith("together_"): return "together"
+    if k.startswith("nvapi-"): return "nvidia"
+    if k.startswith("ds-") or "deepseek" in k.lower(): return "deepseek"
+    if k.startswith("sk-proj-"): return "openai"
+    # sk-... is ambiguous (OpenAI / DeepSeek / Mistral / Fireworks / Perplexity / etc.)
+    if k.startswith("sk-"): return "ambiguous_sk"
+    if k.startswith("co-"): return "cohere"
     return "unknown"
 
 
@@ -135,15 +138,89 @@ _HANDLERS = {
 }
 
 
+async def _mistral(session, key):
+    s, data, _ = await _fetch_json(session, "GET", "https://api.mistral.ai/v1/models",
+                                   headers={"Authorization": f"Bearer {key}"})
+    if s != 200:
+        return {"provider": "Mistral", "valid": False, "status": s, "error": data}
+    ids = [m["id"] for m in data.get("data", [])]
+    return {"provider": "Mistral", "valid": True, "models": ids, "limits": {}}
+
+
+async def _perplexity(session, key):
+    # Perplexity has no public /models GET; probe chat
+    s, data, _ = await _fetch_json(session, "POST", "https://api.perplexity.ai/chat/completions",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={"model": "sonar", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1})
+    if s not in (200, 400):
+        return {"provider": "Perplexity", "valid": False, "status": s, "error": data}
+    return {"provider": "Perplexity", "valid": True,
+            "models": ["sonar", "sonar-pro", "sonar-reasoning"], "limits": {}}
+
+
+async def _fireworks(session, key):
+    s, data, _ = await _fetch_json(session, "GET", "https://api.fireworks.ai/inference/v1/models",
+                                   headers={"Authorization": f"Bearer {key}"})
+    if s != 200:
+        return {"provider": "Fireworks", "valid": False, "status": s, "error": data}
+    ids = [m["id"] for m in (data.get("data", []) if isinstance(data, dict) else [])][:80]
+    return {"provider": "Fireworks", "valid": True, "models": ids, "limits": {}}
+
+
+async def _nvidia(session, key):
+    s, data, _ = await _fetch_json(session, "GET", "https://integrate.api.nvidia.com/v1/models",
+                                   headers={"Authorization": f"Bearer {key}"})
+    if s != 200:
+        return {"provider": "NVIDIA NIM", "valid": False, "status": s, "error": data}
+    ids = [m["id"] for m in data.get("data", [])][:80]
+    return {"provider": "NVIDIA NIM", "valid": True, "models": ids, "limits": {}}
+
+
+_HANDLERS["mistral"] = _mistral
+_HANDLERS["perplexity"] = _perplexity
+_HANDLERS["fireworks"] = _fireworks
+_HANDLERS["nvidia"] = _nvidia
+
+# Probe order when key prefix is ambiguous or unknown
+_PROBE_ORDER = [
+    "openai", "deepseek", "mistral", "groq", "together", "fireworks",
+    "perplexity", "xai", "anthropic", "openrouter", "cohere", "nvidia", "gemini",
+]
+
+
+async def _probe_all(session, key, order=None):
+    """Try each provider sequentially; return first valid result."""
+    order = order or _PROBE_ORDER
+    last = None
+    for name in order:
+        handler = _HANDLERS.get(name)
+        if not handler:
+            continue
+        try:
+            res = await handler(session, key)
+        except Exception as e:
+            res = {"provider": name, "valid": False, "error": str(e)}
+        if res.get("valid"):
+            return res
+        last = res
+    return last or {"provider": "Unknown", "valid": False, "error": "no provider matched"}
+
+
 async def inspect_key(key: str) -> dict:
     provider = _detect(key)
     async with aiohttp.ClientSession() as session:
         if provider in _HANDLERS:
-            return await _HANDLERS[provider](session, key)
-        # Try OpenAI-compatible as a fallback
-        result = await _openai(session, key)
-        result["provider"] = "Unknown (tried OpenAI-compatible)"
-        return result
+            res = await _HANDLERS[provider](session, key)
+            if res.get("valid"):
+                return res
+            # fall through: prefix lied, probe others
+            order = [p for p in _PROBE_ORDER if p != provider]
+            probed = await _probe_all(session, key, order)
+            if probed.get("valid"):
+                return probed
+            return res  # original detailed error
+        # ambiguous_sk or unknown -> probe everything
+        return await _probe_all(session, key)
 
 
 async def try_model(key: str, model: str, prompt: str) -> str:
