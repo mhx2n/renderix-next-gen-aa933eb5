@@ -27,6 +27,7 @@ from .tools import textenc as _textenc, language as _language, photo as _photo, 
 
 _HISTORY: dict = defaultdict(list)
 _PENDING_KEY: dict = {}     # user_id -> last inspected api key
+_PENDING_KIND: dict = {}    # user_id -> resolved provider kind ("openai", "cohere", ...)
 _AWAIT_INPUT: dict = {}     # user_id -> ("key"|"download"|"tryke"|"announce"|"speak_to"|"grant"|"revoke")
 _DOWNLOAD_SEM = asyncio.Semaphore(1)  # keep free hosting stable: one download at a time
 _DOWNLOAD_QUEUE = 0
