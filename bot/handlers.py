@@ -1174,13 +1174,29 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    from .keycheck import _detect
-    kind = _detect(key)
+    from .keycheck import _detect, inspect_key
+    kind = (_PENDING_KIND.get(uid) or "").lower()
+    if not kind or kind not in _PROVIDER_BASE_URLS:
+        # detection fallback: prefix sniff
+        guess = _detect(key)
+        if guess in _PROVIDER_BASE_URLS:
+            kind = guess
+        else:
+            # last resort: live probe via inspect_key (handles ambiguous_sk / unknown)
+            try:
+                info = await inspect_key(key)
+                if info.get("valid"):
+                    kind = (info.get("kind") or "").lower()
+                    _PENDING_KIND[uid] = kind
+            except Exception:
+                pass
     base_url = _PROVIDER_BASE_URLS.get(kind)
     if not base_url:
         await update.effective_message.reply_text(
-            f"This key type ({kind}) is not yet supported for custom providers.\n"
-            "Supported: OpenAI, Groq, OpenRouter, DeepSeek, xAI, Together AI, Cohere."
+            "Couldn't auto-detect this key's provider. Run /key again with the key, "
+            "then retry /addmodel.\n"
+            "Supported: OpenAI, Groq, OpenRouter, DeepSeek, xAI, Together AI, Cohere, "
+            "Mistral, Perplexity, Fireworks, NVIDIA."
         )
         return
 
