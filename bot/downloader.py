@@ -116,6 +116,30 @@ def _normalize_url(url: str) -> str:
     return url
 
 
+def _extract_share_target(url: str) -> str:
+    """Best-effort expansion for short/share links before yt-dlp touches them."""
+    normalized = _normalize_url(url)
+    low = (normalized or "").lower()
+    if "facebook.com/share/" not in low and "fb.watch/" not in low:
+        return normalized
+    try:
+        resp = requests.get(
+            normalized,
+            headers={
+                "User-Agent": _UA_DESKTOP,
+                "Referer": "https://www.facebook.com/",
+            },
+            timeout=15,
+            allow_redirects=True,
+        )
+        final_url = (resp.url or "").strip()
+        if final_url.startswith("http"):
+            return final_url
+    except Exception:
+        pass
+    return normalized
+
+
 def _run_ffmpeg(args: list[str], timeout: int = 240) -> None:
     proc = subprocess.run(
         args,
@@ -127,6 +151,21 @@ def _run_ffmpeg(args: list[str], timeout: int = 240) -> None:
     if proc.returncode != 0:
         err = proc.stderr.decode("utf-8", errors="ignore").strip()
         raise RuntimeError(err or "ffmpeg failed")
+
+
+def _looks_like_html(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            head = f.read(2048).lower()
+    except Exception:
+        return False
+    return any(marker in head for marker in (
+        b"<!doctype html",
+        b"<html",
+        b"<head",
+        b"<body",
+        b"facebook helps you connect",
+    ))
 
 
 def _probe_media(path: str) -> dict:
@@ -164,6 +203,10 @@ def _ensure_telegram_media(path: str, audio_only: bool) -> str:
     """Convert/remux media to Telegram-friendly formats when needed."""
     if not path or not os.path.exists(path):
         return path
+    if _looks_like_html(path):
+        raise RuntimeError(
+            "Downloaded page instead of media stream. The site likely returned a login/consent page."
+        )
 
     base, ext = os.path.splitext(path)
     ext = ext.lower()
@@ -411,7 +454,7 @@ def _tikwm_download(url: str, workdir: str, audio_only: bool) -> Optional[dict]:
 
 def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
                    audio_only: bool = False) -> dict:
-    url = _normalize_url(url)
+    url = _extract_share_target(url)
     outtmpl = os.path.join(workdir, "%(id).40s.%(ext)s")
     platform = platform_from_url(url)
 
@@ -434,6 +477,7 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
         pass  # tolerate probe failure
 
     last_err: Optional[Exception] = None
+    raw_errors: list[str] = []
     hook = _make_progress_hook(progress)
     ladder = _AUDIO_LADDER if audio_only else _FORMAT_LADDER
 
@@ -494,9 +538,20 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
         except yt_dlp.utils.DownloadError as e:
             last_err = e
             msg = str(e).lower()
+            raw_errors.append(str(e)[:500])
             if "max-filesize" in msg or "file is larger" in msg \
                or "requested format is not available" in msg:
                 continue
+            if platform == "facebook" and (
+                "cannot parse data" in msg
+                or "no video formats found" in msg
+                or "requested format is not available" in msg
+            ):
+                raise RuntimeError(
+                    "[facebook] Facebook blocked or hid the reel/video stream for this server. "
+                    "Open the share link once in a browser and resend the final public reel/watch URL. "
+                    "If it still fails, the owner must provide fresh Facebook cookies to yt-dlp."
+                )
             # bot-check / auth → no point hammering further tiers
             if "sign in to confirm" in msg or "login required" in msg \
                or "private" in msg or "age" in msg:
@@ -504,6 +559,7 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
             continue
         except Exception as e:
             last_err = e
+            raw_errors.append(str(e)[:500])
             continue
 
     # TikTok: last-ditch fallback to tikwm if yt-dlp failed completely.
@@ -564,6 +620,15 @@ def user_error_text(err: Exception) -> str:
             )
     if "login required" in low or "private" in low:
         return "This post is private or requires login."
+    if platform == "facebook" and (
+        "cannot parse data" in low
+        or "no video formats found" in low
+        or "facebook blocked or hid" in low
+    ):
+        return (
+            "Facebook share/reel link টি server থেকে playable stream দিচ্ছে না।\n"
+            "Final public reel/watch URL পাঠান। যদি তবুও fail করে, owner-কে fresh Facebook cookies যোগ করতে হবে।"
+        )
     if "age" in low and "restricted" in low:
         return "Age-restricted content cannot be downloaded without login."
     if "too long" in low or "too large" in low or "max " in low:
