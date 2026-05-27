@@ -312,8 +312,22 @@ def owner_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton("Speak Grants", callback_data="ow:grants")],
         [InlineKeyboardButton("Live Response Toggle", callback_data="ow:live")],
         [InlineKeyboardButton("Toggle Commands", callback_data="ow:toggle:0")],
+        [InlineKeyboardButton("🎨 Customize Menu", callback_data="ow:cust")],
         [InlineKeyboardButton("Set Channel", callback_data="ow:setch")],
         [InlineKeyboardButton("« Back", callback_data="m:home")],
+    ])
+
+
+async def cust_kb() -> InlineKeyboardMarkup:
+    width = await get_ui_row_width()
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Edit Welcome Text", callback_data="cust:welcome")],
+        [InlineKeyboardButton(f"🔢 Buttons per row: {width}", callback_data="cust:row")],
+        [InlineKeyboardButton("🏷️ Rename Button", callback_data="cust:label")],
+        [InlineKeyboardButton("😀 Set Button Emoji", callback_data="cust:emoji")],
+        [InlineKeyboardButton("📂 Rename Category", callback_data="cust:cat")],
+        [InlineKeyboardButton("♻️ Reset All", callback_data="cust:reset")],
+        [InlineKeyboardButton("« Owner Panel", callback_data="m:owner")],
     ])
 
 
