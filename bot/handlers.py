@@ -701,7 +701,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Memory (RSS): <code>{human_size(pm['rss_bytes'])}</code>\n"
         f"• CPU load (1/5/15m): <code>{pm['load_1']:.2f} / {pm['load_5']:.2f} / {pm['load_15']:.2f}</code>\n"
         f"• CPU cores: <code>{pm['cpu_count']}</code>\n"
-        f"• Download queue: <code>{max(0, 1 - _DOWNLOAD_SEM._value)}</code> running\n"
+        f"• Download queue: <code>{_DOWNLOAD_QUEUE}</code> total waiting/running\n"
         f"• Users: <code>{s['users']}</code>\n"
         f"• Banned: <code>{s['banned']}</code>\n"
         f"• Messages: <code>{s['messages']}</code>\n"
