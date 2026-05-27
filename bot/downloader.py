@@ -328,11 +328,11 @@ def _ydl_base(url: str) -> dict:
 # Format ladder (descending preference). Each tier stays under MAX_BYTES.
 _FORMAT_LADDER = [
     # Tier 1: best compact mp4 under cap
-    f"bv*[ext=mp4][filesize<{MAX_BYTES}]+ba[ext=m4a]/"
-    f"b[ext=mp4][filesize<{MAX_BYTES}]",
+    f"bv*[ext=mp4][filesize<=?{MAX_BYTES}]+ba[ext=m4a][filesize<=?{MAX_BYTES}]/"
+    f"b[ext=mp4][filesize<=?{MAX_BYTES}]",
     # Tier 2: any combo under cap
-    f"bv*[filesize<{MAX_BYTES}]+ba/"
-    f"b[filesize<{MAX_BYTES}]",
+    f"bv*[filesize<=?{MAX_BYTES}]+ba[filesize<=?{MAX_BYTES}]/"
+    f"b[filesize<=?{MAX_BYTES}]",
     # Tier 3: capped height
     "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/"
     "bv*[height<=720]+ba/b[height<=720]",
@@ -346,7 +346,7 @@ _FORMAT_LADDER = [
 
 # Audio-only ladder
 _AUDIO_LADDER = [
-    f"ba[ext=m4a][filesize<{MAX_BYTES}]/ba[filesize<{MAX_BYTES}]",
+    f"ba[ext=m4a][filesize<=?{MAX_BYTES}]/ba[filesize<=?{MAX_BYTES}]",
     "bestaudio[ext=m4a]/bestaudio/best",
     "best",
 ]
