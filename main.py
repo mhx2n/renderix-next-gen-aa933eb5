@@ -69,6 +69,12 @@ async def _amain():
     await setup_bot_commands(app)
     await notify_restart_complete(app)
 
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=False)
+    except Exception as exc:
+        log.warning("Could not clear webhook before polling: %s", exc)
+    await asyncio.sleep(2)
+
     # Drop pending updates from previous run to avoid double-processing.
     await app.updater.start_polling(
         drop_pending_updates=True,
