@@ -1559,6 +1559,9 @@ OWNER_EXTRA = [
     BotCommand("restart",    "Restart the bot process"),
     BotCommand("mkey",       "Set translation/OCR engine key"),
     BotCommand("mlimit",     "Set translation/OCR daily per-user limit"),
+    BotCommand("addmodel",   "Add model from last /key as provider"),
+    BotCommand("delprovider","Remove a custom provider"),
+    BotCommand("providers",  "List active providers"),
 ]
 
 
