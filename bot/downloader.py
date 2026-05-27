@@ -135,15 +135,32 @@ def _extract_share_target(url: str) -> str:
     )):
         return normalized
     try:
-        resp = requests.get(
-            normalized,
-            headers={
-                "User-Agent": _UA_DESKTOP,
-                "Referer": "https://www.facebook.com/",
-            },
-            timeout=15,
-            allow_redirects=True,
-        )
+        # HEAD first — faster, avoids hanging on huge HTML bodies.
+        try:
+            resp = requests.head(
+                normalized,
+                headers={
+                    "User-Agent": _UA_IOS,
+                    "Referer": "https://www.facebook.com/",
+                },
+                timeout=10,
+                allow_redirects=True,
+            )
+        except Exception:
+            resp = requests.get(
+                normalized,
+                headers={
+                    "User-Agent": _UA_IOS,
+                    "Referer": "https://www.facebook.com/",
+                },
+                timeout=10,
+                allow_redirects=True,
+                stream=True,
+            )
+            try:
+                resp.close()
+            except Exception:
+                pass
         final_url = (resp.url or "").strip()
         content_type = (resp.headers.get("content-type") or "").lower()
         if resp.status_code < 400 and final_url.startswith("http") and "text/html" not in content_type:
