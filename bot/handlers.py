@@ -126,7 +126,7 @@ async def stream_edit(message, text: str, reply_markup=None):
 # ============================================================
 TOOL_CATALOG: dict = {
     "AI Tools": [
-        ("g",     "Gemini",       "Chat with Google Gemini.\n\n<b>Usage:</b>\n<code>/g your question</code>  or  <code>.g your question</code>\nReply to my answer to continue."),
+        ("g",     "Gemini",       "Chat with Google Gemini.\n\n<b>Usage:</b>\n<code>/g your question</code>  or  <code>.g your question</code>"),
         ("pr",    "Perplexity",   "Chat with Perplexity AI.\n\n<b>Usage:</b>\n<code>/pr your question</code>  or  <code>.pr ...</code>"),
         ("co",    "Copilot",      "Chat with Microsoft Copilot.\n\n<b>Usage:</b>\n<code>/co your question</code>  or  <code>.co ...</code>"),
         ("key",   "API Key Inspector", "Inspect any AI API key (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Cohere, DeepSeek, xAI, Together AI).\n\n<b>Usage:</b>\n<code>/key &lt;API_KEY&gt;</code>"),
@@ -327,7 +327,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/dla <url> — download audio mp3 (FB/IG/TikTok)",
             "/ping   — latency",
             "/help <topic>  — AI-summarized help on any topic\n",
-            "Plain text does nothing. Only commands work.",
+            "Plain text does nothing. Only /command or .command works.",
         ]
         await send_md(update.effective_message, "\n".join(lines))
         return
@@ -338,7 +338,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "API Key Inspector: /key <KEY> works for OpenAI, Anthropic, Gemini, Groq, "
         "OpenRouter, Cohere, DeepSeek, xAI, Together AI. Then /tryke <model> <prompt>.\n"
         "Video Downloader: /dl <url> and /dla <url> for Facebook, Instagram, TikTok only (under 50MB).\n"
-        "Conversation: reply to any bot answer to continue with the same model.\n"
         "Plain text without / or . command must do nothing.\n"
         f"User asked: {args}\n"
         "Never mention owner/admin/private tools, even if the user asks.\n"
@@ -1148,7 +1147,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(
             f"*Selected: {name}*\n\n"
             f"Send: `.{k} your question`\nOr: `/{k} your question`\n\n"
-            f"Reply to my answer to continue the conversation. Plain text alone will be ignored.",
+            f"Plain text alone will be ignored.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=back_home_kb())
         return
 
