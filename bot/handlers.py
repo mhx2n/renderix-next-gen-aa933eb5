@@ -443,7 +443,14 @@ async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
         await db.log("ERROR", update.effective_user.id, provider_key, "timeout")
     except Exception as e:
         tb = traceback.format_exc(limit=2)
-        msg = f"{name} error.\n\n`{e}`"
+        err_text = str(e)
+        if provider_key == "pr" and ("Perplexity HTTP 403" in err_text or "HTTP 403" in err_text):
+            msg = (
+                "Perplexity is blocking requests from this server right now.\n\n"
+                "Use /g or /co for now, or add fresh Perplexity browser cookies / a browser-backed proxy on the server."
+            )
+        else:
+            msg = f"{name} error.\n\n`{e}`"
         if placeholder: await safe_edit(placeholder, msg)
         else: await send_md(update.effective_message, msg)
         await db.log("ERROR", update.effective_user.id, provider_key, f"{e}\n{tb}")
@@ -1328,15 +1335,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.log("ERROR", uid, "speak", str(e)[:500])
         return
 
-    # 3) Reply-to-bot continuation
-    if msg.reply_to_message and msg.reply_to_message.from_user \
-            and msg.reply_to_message.from_user.id == context.bot.id \
-            and not text.startswith(("/", ".")):
-        sess = await db.get_session(msg.chat_id, msg.reply_to_message.message_id)
-        if sess:
-            await _call_provider(update, context, sess[0], text); return
-
-    # 4) Dot-prefix commands
+    # 3) Dot-prefix commands
     if text.startswith("."):
         first, _, rest = text[1:].partition(" ")
         cmd = first.lower()
@@ -1360,7 +1359,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.args = rest.split() if rest else []
                 await oalias[cmd](update, context); return
 
-    # 5) Plain text without command must do nothing
+    # 4) Plain text without command must do nothing
     return
 
 
