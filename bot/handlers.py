@@ -171,17 +171,68 @@ async def _set_disabled(s: set):
     await db.set_setting("disabled_cmds", ",".join(sorted(s)))
 
 
+# ------- UI customization (owner-editable) -------
+DEFAULT_WELCOME = (
+    "<b>Welcome, {name}.</b>\n\n"
+    "Command-based bot.\n"
+    "• AI only works with commands like /g, /pr, /co\n"
+    "• Downloader only supports Facebook, Instagram, TikTok\n"
+    "• Plain text messages do nothing\n\n"
+    "Tap a button below to see commands."
+)
+
+
+async def _get_json_setting(key: str, default):
+    raw = await db.get_setting(key, "")
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except Exception:
+        return default
+
+
+async def _set_json_setting(key: str, value):
+    await db.set_setting(key, json.dumps(value, ensure_ascii=False))
+
+
+async def get_ui_labels() -> dict:
+    return await _get_json_setting("ui_labels", {})
+
+
+async def get_ui_emojis() -> dict:
+    return await _get_json_setting("ui_emojis", {})
+
+
+async def get_ui_cat_labels() -> dict:
+    return await _get_json_setting("ui_cat_labels", {})
+
+
+async def get_ui_row_width() -> int:
+    try:
+        return max(1, min(3, int(await db.get_setting("ui_row_width", "2") or "2")))
+    except Exception:
+        return 2
+
+
+async def get_ui_welcome() -> str:
+    return (await db.get_setting("ui_welcome", "")) or DEFAULT_WELCOME
+
+
 # ============================================================
 # Main menus (inline keyboards)
 # ============================================================
 async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
     disabled = await _disabled_set()
+    cat_labels = await get_ui_cat_labels()
+    width = await get_ui_row_width()
     rows, row = [], []
     for cat, items in TOOL_CATALOG.items():
         if not any(c not in disabled for c, _, _ in items):
             continue
-        row.append(InlineKeyboardButton(cat, callback_data=f"cat:{cat}"))
-        if len(row) == 2:
+        label = cat_labels.get(cat, cat)
+        row.append(InlineKeyboardButton(label, callback_data=f"cat:{cat}"))
+        if len(row) == width:
             rows.append(row); row = []
     if row: rows.append(row)
     if is_owner(uid):
@@ -191,12 +242,17 @@ async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
 
 async def category_kb(cat: str) -> InlineKeyboardMarkup:
     disabled = await _disabled_set()
+    labels = await get_ui_labels()
+    emojis = await get_ui_emojis()
+    width = await get_ui_row_width()
     rows, row = [], []
     for cmd, label, _doc in TOOL_CATALOG.get(cat, []):
         if cmd in disabled:
             continue
-        row.append(InlineKeyboardButton(label, callback_data=f"tool:{cmd}"))
-        if len(row) == 2:
+        em = emojis.get(cmd, "")
+        display = (f"{em} {labels.get(cmd, label)}" if em else labels.get(cmd, label)).strip()
+        row.append(InlineKeyboardButton(display, callback_data=f"tool:{cmd}"))
+        if len(row) == width:
             rows.append(row); row = []
     if row: rows.append(row)
     rows.append([InlineKeyboardButton("« Back to Main Menu", callback_data="m:home")])
@@ -256,8 +312,22 @@ def owner_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton("Speak Grants", callback_data="ow:grants")],
         [InlineKeyboardButton("Live Response Toggle", callback_data="ow:live")],
         [InlineKeyboardButton("Toggle Commands", callback_data="ow:toggle:0")],
+        [InlineKeyboardButton("🎨 Customize Menu", callback_data="ow:cust")],
         [InlineKeyboardButton("Set Channel", callback_data="ow:setch")],
         [InlineKeyboardButton("« Back", callback_data="m:home")],
+    ])
+
+
+async def cust_kb() -> InlineKeyboardMarkup:
+    width = await get_ui_row_width()
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Edit Welcome Text", callback_data="cust:welcome")],
+        [InlineKeyboardButton(f"🔢 Buttons per row: {width}", callback_data="cust:row")],
+        [InlineKeyboardButton("🏷️ Rename Button", callback_data="cust:label")],
+        [InlineKeyboardButton("😀 Set Button Emoji", callback_data="cust:emoji")],
+        [InlineKeyboardButton("📂 Rename Category", callback_data="cust:cat")],
+        [InlineKeyboardButton("♻️ Reset All", callback_data="cust:reset")],
+        [InlineKeyboardButton("« Owner Panel", callback_data="m:owner")],
     ])
 
 
@@ -298,18 +368,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_ok(update, context):
         return
     name = escape_html(update.effective_user.first_name or "there")
-    txt = (
-        f"*Welcome, {name}.*\n\n"
-        "Command-based bot.\n"
-        "• AI only works with commands like /g, /pr, /co\n"
-        "• Downloader only supports Facebook, Instagram, TikTok\n"
-        "• Plain text messages do nothing\n\n"
-        "Tap a button below to see commands."
-    )
-    await update.effective_message.reply_text(
-        txt, parse_mode=ParseMode.MARKDOWN,
-        reply_markup=await main_menu_kb(update.effective_user.id),
-    )
+    template = await get_ui_welcome()
+    try:
+        txt = template.replace("{name}", name)
+    except Exception:
+        txt = template
+    try:
+        await update.effective_message.reply_text(
+            txt, parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=await main_menu_kb(update.effective_user.id),
+        )
+    except Exception:
+        await update.effective_message.reply_text(
+            clean_text(txt),
+            reply_markup=await main_menu_kb(update.effective_user.id),
+        )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1394,6 +1468,83 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=await toggle_kb(page),
             )
             return
+        if sub == "cust":
+            await q.edit_message_text(
+                "<b>🎨 Customize Menu</b>\n\n"
+                "Personalize the main panel: welcome text, button labels, emojis, "
+                "category names, and layout. Changes apply instantly to all users.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=await cust_kb(),
+            )
+            return
+
+    # Customize Menu sub-actions
+    if data.startswith("cust:"):
+        if not is_owner(uid): return
+        sub = data[5:]
+        if sub == "welcome":
+            _AWAIT_INPUT[uid] = ("cust_welcome", None)
+            cur = await get_ui_welcome()
+            await q.edit_message_text(
+                "<b>Edit Welcome Text</b>\n\n"
+                "Send the new welcome message as your next message.\n"
+                "Use <code>{name}</code> for the user's first name. HTML tags allowed "
+                "(<code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;code&gt;</code>).\n"
+                "Send <code>reset</code> to restore the default.\n\n"
+                f"<b>Current:</b>\n<pre>{escape_html(cur)}</pre>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "row":
+            cur = await get_ui_row_width()
+            new = 1 if cur >= 3 else cur + 1
+            await db.set_setting("ui_row_width", str(new))
+            await q.edit_message_text(
+                f"<b>Buttons per row set to {new}.</b>",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "label":
+            _AWAIT_INPUT[uid] = ("cust_label", None)
+            await q.edit_message_text(
+                "<b>Rename Button</b>\n\n"
+                "Send: <code>&lt;cmd&gt; &lt;new label&gt;</code>\n"
+                "Example: <code>g Ask Gemini</code>\n"
+                "Send <code>&lt;cmd&gt; reset</code> to restore the original label.",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "emoji":
+            _AWAIT_INPUT[uid] = ("cust_emoji", None)
+            await q.edit_message_text(
+                "<b>Set Button Emoji</b>\n\n"
+                "Send: <code>&lt;cmd&gt; &lt;emoji&gt;</code>\n"
+                "Example: <code>g 🤖</code>\n"
+                "Send <code>&lt;cmd&gt; off</code> to remove the emoji.",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "cat":
+            _AWAIT_INPUT[uid] = ("cust_cat", None)
+            cats = " | ".join(TOOL_CATALOG.keys())
+            await q.edit_message_text(
+                "<b>Rename Category</b>\n\n"
+                "Send: <code>&lt;category name&gt; | &lt;new label&gt;</code>\n"
+                "Example: <code>AI Tools | 🤖 AI</code>\n"
+                "Use <code>reset</code> as the new label to restore the original.\n\n"
+                f"<b>Categories:</b> {escape_html(cats)}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "reset":
+            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels", "ui_row_width"):
+                await db.set_setting(k, "")
+            await q.edit_message_text(
+                "<b>All UI customizations reset.</b>",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
 
     # Toggle a single command on/off
     if data.startswith("tg:"):
@@ -1454,6 +1605,63 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if kind == "setchannel":
             context.args = [text.split()[0]]
             await cmd_setchannel(update, context); return
+        if kind == "cust_welcome":
+            if text.strip().lower() == "reset":
+                await db.set_setting("ui_welcome", "")
+                await msg.reply_text("Welcome text reset to default.")
+            else:
+                await db.set_setting("ui_welcome", text)
+                await msg.reply_text("Welcome text updated. Tap /start to preview.")
+            return
+        if kind == "cust_label":
+            parts = text.split(None, 1)
+            if len(parts) < 2:
+                await msg.reply_text("Format: <cmd> <new label>"); return
+            cmd, new = parts[0].lstrip("/.").lower(), parts[1].strip()
+            if not _find_tool(cmd)[1]:
+                await msg.reply_text(f"Unknown command: /{cmd}"); return
+            labels = await get_ui_labels()
+            if new.lower() == "reset":
+                labels.pop(cmd, None)
+                await msg.reply_text(f"Label for /{cmd} reset.")
+            else:
+                labels[cmd] = new[:48]
+                await msg.reply_text(f"Label for /{cmd} set to: {new[:48]}")
+            await _set_json_setting("ui_labels", labels)
+            return
+        if kind == "cust_emoji":
+            parts = text.split(None, 1)
+            if len(parts) < 2:
+                await msg.reply_text("Format: <cmd> <emoji>"); return
+            cmd, em = parts[0].lstrip("/.").lower(), parts[1].strip()
+            if not _find_tool(cmd)[1]:
+                await msg.reply_text(f"Unknown command: /{cmd}"); return
+            emojis = await get_ui_emojis()
+            if em.lower() == "off":
+                emojis.pop(cmd, None)
+                await msg.reply_text(f"Emoji for /{cmd} removed.")
+            else:
+                emojis[cmd] = em[:8]
+                await msg.reply_text(f"Emoji for /{cmd} set to: {em[:8]}")
+            await _set_json_setting("ui_emojis", emojis)
+            return
+        if kind == "cust_cat":
+            if "|" not in text:
+                await msg.reply_text("Format: <category> | <new label>"); return
+            old, new = [p.strip() for p in text.split("|", 1)]
+            if old not in TOOL_CATALOG:
+                await msg.reply_text(
+                    "Unknown category. Use one of: " + ", ".join(TOOL_CATALOG.keys())
+                ); return
+            cats = await get_ui_cat_labels()
+            if new.lower() == "reset" or not new:
+                cats.pop(old, None)
+                await msg.reply_text(f"Category '{old}' reset.")
+            else:
+                cats[old] = new[:48]
+                await msg.reply_text(f"Category '{old}' renamed to: {new[:48]}")
+            await _set_json_setting("ui_cat_labels", cats)
+            return
 
     # 2) Owner/granted speak-as-bot forward
     target = await db.get_speak_target(uid)
