@@ -1329,23 +1329,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.log("ERROR", uid, "speak", str(e)[:500])
         return
 
-    # 3) Auto-detect video URLs and offer download
-    url = downloader.detect_url(text)
-    if url and not text.startswith(("/", ".")):
-        # Offer video/audio choice via inline buttons.
-        token = uuid4().hex[:10]
-        context.application.bot_data.setdefault("dl_urls", {})[token] = url
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🎬 Video", callback_data=f"dlx:v:{token}"),
-            InlineKeyboardButton("🎵 Audio", callback_data=f"dlx:a:{token}"),
-        ]])
-        await msg.reply_text(
-            f"Link detected automatically. Choose download type.\n<code>{escape_html(url[:200])}</code>",
-            parse_mode=ParseMode.HTML, reply_markup=kb,
-        )
-        return
-
-    # 4) Reply-to-bot continuation
+    # 3) Reply-to-bot continuation
     if msg.reply_to_message and msg.reply_to_message.from_user \
             and msg.reply_to_message.from_user.id == context.bot.id \
             and not text.startswith(("/", ".")):
@@ -1353,7 +1337,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sess:
             await _call_provider(update, context, sess[0], text); return
 
-    # 5) Dot-prefix commands
+    # 4) Dot-prefix commands
     if text.startswith("."):
         first, _, rest = text[1:].partition(" ")
         cmd = first.lower()
@@ -1376,6 +1360,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if cmd in oalias:
                 context.args = rest.split() if rest else []
                 await oalias[cmd](update, context); return
+
+    # 5) Plain text without command must do nothing
+    return
 
 
 # ============================================================
