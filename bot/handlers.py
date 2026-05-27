@@ -1333,7 +1333,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🎵 Audio", callback_data=f"dlx:a:{token}"),
         ]])
         await msg.reply_text(
-            f"Detected a link. What do you want to download?\n<code>{escape_html(url[:200])}</code>",
+            f"Link detected automatically. Choose download type.\n<code>{escape_html(url[:200])}</code>",
             parse_mode=ParseMode.HTML, reply_markup=kb,
         )
         return
