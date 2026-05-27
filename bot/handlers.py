@@ -144,7 +144,7 @@ TOOL_CATALOG: dict = {
         ("gra",   "Grammar Fix",  "AI-powered grammar correction.\n\n<b>Usage:</b>\n<code>/gra he go home yesterday</code>"),
         ("syn",   "Synonyms",     "Word alternatives.\n\n<b>Usage:</b>\n<code>/syn happy</code>"),
         ("prn",   "Pronounce",    "Phonetic + audio pronunciation.\n\n<b>Usage:</b>\n<code>/prn pronunciation</code>"),
-        ("tr",    "Translate",    "Translate via Mistral AI.\n\n<b>Usage:</b>\n<code>/tr Hello</code> (auto)\n<code>/tr bn Hello</code>\nReply to a message with <code>/tr fr</code>."),
+        ("tr",    "Translate",    "AI-powered translation.\n\n<b>Usage:</b>\n<code>/tr Hello</code> (auto)\n<code>/tr bn Hello</code>\nReply to a message with <code>/tr fr</code>."),
         ("ocr",   "OCR",          "Extract text from an image.\n\n<b>Usage:</b> Reply to a photo with <code>/ocr</code>.\nReply with <code>/ocr en</code> to translate."),
     ],
     "Photo Tools": [
@@ -1406,8 +1406,8 @@ USER_COMMANDS = [
     BotCommand("res",   "Resize image (presets)"),
     BotCommand("short", "Shorten a URL"),
     BotCommand("style", "Stylish text (40+ fonts)"),
-    BotCommand("tr",    "Translate text (Mistral)"),
-    BotCommand("ocr",   "Extract text from image (Mistral)"),
+    BotCommand("tr",    "Translate text"),
+    BotCommand("ocr",   "Extract text from image"),
     BotCommand("ping",  "Latency check"),
     BotCommand("help",  "Help (add a topic for AI summary)"),
 ]
@@ -1426,8 +1426,8 @@ OWNER_EXTRA = [
     BotCommand("grant",      "Grant speak access"),
     BotCommand("revoke",     "Revoke speak access"),
     BotCommand("restart",    "Restart the bot process"),
-    BotCommand("mkey",       "Set Mistral API key"),
-    BotCommand("mlimit",     "Set Mistral daily per-user limit"),
+    BotCommand("mkey",       "Set translation/OCR engine key"),
+    BotCommand("mlimit",     "Set translation/OCR daily per-user limit"),
 ]
 
 
