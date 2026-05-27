@@ -539,7 +539,7 @@ async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not url or not url.startswith("http"):
         _AWAIT_INPUT[update.effective_user.id] = ("download", None)
         await update.effective_message.reply_text(
-            "Send the video URL now. The bot will auto-detect the site and download the best playable format."
+            "Send a Facebook, Instagram, or TikTok video URL now."
         )
         return
     await _run_download(update, context, url)
@@ -552,7 +552,7 @@ async def cmd_dla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = downloader.detect_url(text) or text
     if not url or not url.startswith("http"):
         await update.effective_message.reply_text(
-            "Usage: /dla <url> — downloads audio in MP3 format when possible."
+            "Usage: /dla <url> — Facebook, Instagram, or TikTok only."
         )
         return
     await _run_download(update, context, url, audio_only=True)
