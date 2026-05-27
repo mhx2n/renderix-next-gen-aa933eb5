@@ -2,9 +2,10 @@
 
 A production-grade, fully asynchronous Telegram bot that:
 
-- Talks to **Gemini**, **Perplexity**, and **Copilot** out of the box (no provider API keys required).
+- Talks to **Gemini**, **Perplexity**, and **Copilot** with explicit commands only.
 - Inspects **any** AI provider API key (OpenAI, Anthropic, Google Gemini, Groq, OpenRouter, Cohere, DeepSeek, xAI, Together AI, and any OpenAI-compatible) and shows available models, limits, quota, and lets the user try a model with a prompt.
 - Supports **both `/cmd` and `.cmd`** prefixes for every command.
+- Ignores plain text unless it is a direct reply to a bot AI answer.
 - Hides **owner-only** commands from regular users.
 - Enforces **force-join** on a configurable channel before usage.
 - Supports **reply-to-continue**: reply to any AI answer and the conversation continues in that provider's context.
@@ -58,8 +59,11 @@ Or as a systemd service — see `systemd.service.example` below.
 | `/co <prompt>` `.co <prompt>` | Ask **Copilot** |
 | `/key <API_KEY>` `.key <API_KEY>` | Inspect any AI API key |
 | `/tryke <model> <prompt>` | Run a prompt with the last-inspected key |
+| `/dl <url>` `.dl <url>` | Download **Facebook / Instagram / TikTok** video |
+| `/dla <url>` `.dla <url>` | Download **Facebook / Instagram / TikTok** audio |
 
 Reply to any bot answer to continue that conversation in the same provider.
+Plain text without a command is ignored.
 
 ### Owner (hidden from users)
 | Command | Description |
@@ -87,6 +91,7 @@ menu button, and reply-to-continue all start working).
 
 ## Downloader notes
 
-- Downloads now run one at a time to keep free hosting stable and avoid overload.
-- The bot normalizes short/share links (TikTok, Facebook, Instagram) before download and converts media to Telegram-friendly MP3/MP4 when needed.
-- Some YouTube links may still trigger server-side bot checks. To improve success rate, export fresh browser cookies into `youtube_cookies.txt` or set `YT_COOKIES_FILE` to a valid cookies file path, then restart/redeploy.
+- Downloads run one at a time to keep free hosting stable and avoid overload.
+- Supported sites are limited to **Facebook, Instagram, and TikTok**.
+- The bot normalizes short/share links and converts media to Telegram-friendly MP3/MP4 when needed.
+- If Facebook or Instagram starts blocking public reels from the server, add fresh site cookies for yt-dlp and redeploy.
