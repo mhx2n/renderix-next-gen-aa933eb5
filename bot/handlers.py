@@ -1186,15 +1186,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             live = await db.get_setting("live_response", "on")
             pm = process_metrics(_PROCESS_STARTED_AT)
             await q.edit_message_text(
-                f"*Stats*\n"
-                f"Uptime: `{format_duration(pm['uptime_s'])}`\n"
-                f"RAM: `{human_size(pm['rss_bytes'])}` | "
-                f"Load: `{pm['load_1']:.2f}/{pm['load_5']:.2f}/{pm['load_15']:.2f}` "
-                f"({pm['cpu_count']} cores)\n"
-                f"Users: `{s['users']}` | Banned: `{s['banned']}`\n"
-                f"Messages: `{s['messages']}` | Errors: `{s['errors']}`\n"
-                f"Channel: `{ch}` | Live: `{live}`",
-                parse_mode=ParseMode.MARKDOWN, reply_markup=owner_kb())
+                f"<b>Stats</b>\n"
+                f"Uptime: <code>{format_duration(pm['uptime_s'])}</code>\n"
+                f"RAM: <code>{human_size(pm['rss_bytes'])}</code>\n"
+                f"Load: <code>{pm['load_1']:.2f}/{pm['load_5']:.2f}/{pm['load_15']:.2f}</code>\n"
+                f"CPU cores: <code>{pm['cpu_count']}</code>\n"
+                f"Download queue: <code>{_DOWNLOAD_QUEUE}</code>\n"
+                f"Users: <code>{s['users']}</code> | Banned: <code>{s['banned']}</code>\n"
+                f"Messages: <code>{s['messages']}</code> | Errors: <code>{s['errors']}</code>\n"
+                f"Channel: <code>{escape_html(ch)}</code> | Live: <code>{escape_html(live)}</code>",
+                parse_mode=ParseMode.HTML, reply_markup=owner_kb())
             return
         if sub == "logs":
             rows = await db.get_logs(15)
