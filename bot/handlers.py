@@ -1126,6 +1126,10 @@ _PROVIDER_BASE_URLS = {
     "xai":        "https://api.x.ai/v1",
     "together":   "https://api.together.xyz/v1",
     "cohere":     "https://api.cohere.com/compatibility/v1",
+    "mistral":    "https://api.mistral.ai/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "fireworks":  "https://api.fireworks.ai/inference/v1",
+    "nvidia":     "https://integrate.api.nvidia.com/v1",
 }
 
 
