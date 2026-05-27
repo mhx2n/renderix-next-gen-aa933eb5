@@ -153,8 +153,8 @@ TOOL_CATALOG: dict = {
         ("res",   "Resize",       "Resize to popular presets (YouTube, Instagram, Twitter, HD, 4K).\n\n<b>Usage:</b> Reply to a photo with <code>/res</code>, then pick a preset."),
     ],
     "Utilities": [
-        ("dl",    "Video Downloader","Download from YouTube, Facebook, Instagram, TikTok, 1000+ sites (max 50MB).\n\n<b>Usage:</b> <code>/dl &lt;url&gt;</code> or just send the URL."),
-        ("dla",   "Audio Downloader","Extract audio (mp3) from any supported video link.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
+        ("dl",    "Video Downloader","Download high-quality playable video from Facebook, Instagram, and TikTok only (max 50MB).\n\n<b>Usage:</b> <code>/dl &lt;url&gt;</code>"),
+        ("dla",   "Audio Downloader","Extract audio (mp3) from Facebook, Instagram, and TikTok links only.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
         ("short", "URL Shortener","Shorten any URL.\n\n<b>Usage:</b>\n<code>/short https://example.com/path</code>"),
         ("ping",  "Ping",         "Bot latency check.\n\n<b>Usage:</b> <code>/ping</code>"),
         ("help",  "Help / About", "AI-summarised help.\n\n<b>Usage:</b>\n<code>/help</code> or <code>/help &lt;topic&gt;</code>"),
