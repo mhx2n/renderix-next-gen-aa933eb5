@@ -631,9 +631,9 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     f"Size: {human_size(info['size'])}"
                 )
             except Exception: pass
-            caption = clean_text(
-                f"{info['title'] or 'Video'}\n{info['uploader']} • {human_size(info['size'])}"
-            )[:900]
+            title = clean_text(info.get("title") or ("Audio" if info.get("audio_only") else "Video"))
+            uploader = clean_text(info.get("uploader") or "Unknown source")
+            caption = clean_text(f"{title}\n{uploader} • {human_size(info['size'])}")[:900]
             width = info.get("width") or None
             height = info.get("height") or None
             with open(info["path"], "rb") as f:
@@ -664,7 +664,7 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
     except Exception as e:
         try: await status.edit_text(f"Download failed:\n{downloader.user_error_text(e)}")
         except Exception: pass
-        await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {e}")
+        await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {type(e).__name__}: {e}")
     finally:
         async with _DOWNLOAD_QUEUE_LOCK:
             _DOWNLOAD_QUEUE = max(0, _DOWNLOAD_QUEUE - 1)
@@ -675,7 +675,8 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # Owner panel
 # ============================================================
 async def _owner_only(update: Update) -> bool:
-    return is_owner(update.effective_user.id)
+    user = update.effective_user
+    return bool(user and is_owner(user.id))
 
 
 async def load_custom_providers(app: Application | None = None):
