@@ -1130,13 +1130,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("API key tools:", reply_markup=keytools_kb()); return
     if data == "m:dl":
         await q.edit_message_text(
-            "*Video Downloader*\n\nSupports YouTube, Facebook, Instagram, TikTok.\n"
-            "Max 50MB. Send the URL after tapping below.",
+            "*Video Downloader*\n\nSupports Facebook, Instagram, TikTok only.\n"
+            "Max 50MB. Use /dl for video and /dla for audio.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=dl_kb()); return
     if data == "m:help":
         await q.edit_message_text(
             "*Help*\n\nUse the buttons in the main menu, or these commands:\n"
-            "/key, /tryke, /dl, /menu, /ping, /help <topic>",
+            "/key, /tryke, /dl, /dla, /menu, /ping, /help <topic>\n\nPlain text does nothing.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=back_home_kb()); return
     if data == "m:owner":
         if not is_owner(uid): return
@@ -1148,7 +1148,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(
             f"*Selected: {name}*\n\n"
             f"Send: `.{k} your question`\nOr: `/{k} your question`\n\n"
-            f"Reply to my answer to continue the conversation.",
+            f"Reply to my answer to continue the conversation. Plain text alone will be ignored.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=back_home_kb())
         return
 
@@ -1168,7 +1168,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "dl:ask":
         _AWAIT_INPUT[uid] = ("download", None)
-        await q.edit_message_text("Send the video URL now.", reply_markup=back_home_kb()); return
+        await q.edit_message_text("Send a Facebook, Instagram, or TikTok URL now.", reply_markup=back_home_kb()); return
 
     if data.startswith("dlx:"):
         try:
