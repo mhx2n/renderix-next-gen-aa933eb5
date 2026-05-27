@@ -800,7 +800,7 @@ async def load_custom_providers(app: Application | None = None):
     for cmd, name, base_url, api_key, model, enabled in rows:
         if not enabled:
             continue
-        register_provider(cmd, name, make_openai_compatible_provider(name, base_url, api_key, model))
+        register_provider(cmd, name, rebuild_provider_from_db(name, base_url, api_key, model))
         if app:
             app.add_handler(CommandHandler(cmd, make_provider_handler(cmd)))
         # Also expose as a button in the AI Tools section of the main panel.
