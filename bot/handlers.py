@@ -540,9 +540,26 @@ async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _run_download(update, context, url)
 
 
-async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+async def cmd_dla(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Audio-only download."""
+    if not await force_join_ok(update, context): return
+    text = " ".join(context.args).strip()
+    url = downloader.detect_url(text) or text
+    if not url or not url.startswith("http"):
+        await update.effective_message.reply_text(
+            "Usage: /dla <url>  — downloads the audio track only."
+        )
+        return
+    await _run_download(update, context, url, audio_only=True)
+
+
+async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                        url: str, audio_only: bool = False):
     chat_id = update.effective_chat.id
-    status = await update.effective_message.reply_text("Queued. Preparing download...")
+    kind = "audio" if audio_only else "video"
+    status = await update.effective_message.reply_text(
+        f"Queued. Preparing {kind} download…"
+    )
     info = None
     loop = asyncio.get_running_loop()
     last_edit = {"t": 0.0, "text": ""}
@@ -580,9 +597,13 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url:
 
     try:
         async with _DOWNLOAD_SEM:
-            await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
+            await context.bot.send_chat_action(
+                chat_id,
+                ChatAction.UPLOAD_VOICE if audio_only else ChatAction.UPLOAD_VIDEO,
+            )
             info = await asyncio.wait_for(
-                downloader.download(url, progress=_on_progress), timeout=420,
+                downloader.download(url, progress=_on_progress, audio_only=audio_only),
+                timeout=420,
             )
             try:
                 await status.edit_text(f"Uploading ({human_size(info['size'])})…")
@@ -591,12 +612,21 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url:
                 f"{info['title'] or 'Video'}\n{info['uploader']} • {human_size(info['size'])}"
             )[:900]
             with open(info["path"], "rb") as f:
-                await context.bot.send_video(
-                    chat_id=chat_id, video=f, caption=caption,
-                    supports_streaming=True,
-                    duration=info.get("duration") or None,
-                    write_timeout=240, read_timeout=240,
-                )
+                if info.get("audio_only"):
+                    await context.bot.send_audio(
+                        chat_id=chat_id, audio=f, caption=caption,
+                        title=info.get("title") or None,
+                        performer=info.get("uploader") or None,
+                        duration=info.get("duration") or None,
+                        write_timeout=240, read_timeout=240,
+                    )
+                else:
+                    await context.bot.send_video(
+                        chat_id=chat_id, video=f, caption=caption,
+                        supports_streaming=True,
+                        duration=info.get("duration") or None,
+                        write_timeout=240, read_timeout=240,
+                    )
             try: await status.delete()
             except Exception: pass
         await db.log("INFO", update.effective_user.id, "dl", url[:200])
