@@ -1360,6 +1360,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await oalias[cmd](update, context); return
 
     # 4) Plain text without command must do nothing
+    # Exception: if this is a reply to a previous bot AI message that has a
+    # saved session, continue that conversation with the same provider.
+    rep = msg.reply_to_message
+    if rep and rep.from_user and rep.from_user.id == context.bot.id:
+        sess = await db.get_session(update.effective_chat.id, rep.message_id)
+        if sess:
+            provider_key = sess[0]
+            if provider_key in REGISTRY:
+                await _call_provider(update, context, provider_key, text)
+                return
     return
 
 
