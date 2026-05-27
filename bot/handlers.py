@@ -152,6 +152,7 @@ TOOL_CATALOG: dict = {
     ],
     "Utilities": [
         ("dl",    "Video Downloader","Download from YouTube, Facebook, Instagram, TikTok, 1000+ sites (max 50MB).\n\n<b>Usage:</b> <code>/dl &lt;url&gt;</code> or just send the URL."),
+        ("dla",   "Audio Downloader","Extract audio (mp3) from any supported video link.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
         ("short", "URL Shortener","Shorten any URL.\n\n<b>Usage:</b>\n<code>/short https://example.com/path</code>"),
         ("ping",  "Ping",         "Bot latency check.\n\n<b>Usage:</b> <code>/ping</code>"),
         ("help",  "Help / About", "AI-summarised help.\n\n<b>Usage:</b>\n<code>/help</code> or <code>/help &lt;topic&gt;</code>"),
