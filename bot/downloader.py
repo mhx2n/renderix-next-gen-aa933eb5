@@ -133,7 +133,10 @@ def _extract_share_target(url: str) -> str:
             allow_redirects=True,
         )
         final_url = (resp.url or "").strip()
-        if final_url.startswith("http"):
+        content_type = (resp.headers.get("content-type") or "").lower()
+        if resp.status_code < 400 and final_url.startswith("http") and "text/html" not in content_type:
+            return final_url
+        if resp.status_code < 400 and final_url.startswith("http") and final_url != normalized:
             return final_url
     except Exception:
         pass
@@ -488,8 +491,9 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
         opts = _ydl_base(url)
         opts["outtmpl"] = outtmpl
         opts["format"] = fmt
-        opts["format_sort"] = ["+size", "+br", "+res", "+fps"]
-        opts["max_filesize"] = MAX_BYTES
+        opts["format_sort"] = ["res", "fps", "br", "size"]
+        if tier_idx < max(0, len(ladder) - 2):
+            opts["max_filesize"] = MAX_BYTES
         if hook:
             opts["progress_hooks"] = [hook]
         if audio_only:
