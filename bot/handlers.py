@@ -509,6 +509,10 @@ async def _do_inspect(update: Update, key: str):
             for k, v in limits.items():
                 lines.append(f"  • {escape_html(str(k))}: <code>{escape_html(str(v))}</code>")
         lines.append("\nTry a model: <code>/tryke &lt;model&gt; &lt;prompt&gt;</code>")
+        if is_owner(update.effective_user.id):
+            lines.append(
+                "Add as bot provider: <code>/addmodel &lt;alias&gt; &lt;model&gt;</code>"
+            )
         await safe_edit(placeholder, "\n".join(lines))
     except Exception as e:
         await safe_edit(placeholder, safe_user_error("Key inspection"))
