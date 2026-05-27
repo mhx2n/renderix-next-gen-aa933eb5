@@ -144,6 +144,12 @@ async def _together(session, key):
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
         return {"provider": "Together AI", "kind": "together", "valid": False, "status": s, "error": data}
+    # Together's /v1/models is public — confirm with an authenticated chat call
+    ok, info = await _verify_auth(session, "https://api.together.xyz/v1", key,
+                                  "meta-llama/Llama-3.3-70B-Instruct-Turbo")
+    if not ok:
+        return {"provider": "Together AI", "kind": "together", "valid": False,
+                "status": info.get("status"), "error": info.get("body")}
     ids = [m["id"] for m in (data if isinstance(data, list) else data.get("data", []))][:80]
     return {"provider": "Together AI", "kind": "together", "valid": True, "models": ids, "limits": {}}
 
@@ -160,6 +166,10 @@ async def _mistral(session, key):
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
         return {"provider": "Mistral", "kind": "mistral", "valid": False, "status": s, "error": data}
+    ok, info = await _verify_auth(session, "https://api.mistral.ai/v1", key, "mistral-small-latest")
+    if not ok:
+        return {"provider": "Mistral", "kind": "mistral", "valid": False,
+                "status": info.get("status"), "error": info.get("body")}
     ids = [m["id"] for m in data.get("data", [])]
     return {"provider": "Mistral", "kind": "mistral", "valid": True, "models": ids, "limits": {}}
 
@@ -180,6 +190,11 @@ async def _fireworks(session, key):
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
         return {"provider": "Fireworks", "kind": "fireworks", "valid": False, "status": s, "error": data}
+    ok, info = await _verify_auth(session, "https://api.fireworks.ai/inference/v1", key,
+                                  "accounts/fireworks/models/llama-v3p1-8b-instruct")
+    if not ok:
+        return {"provider": "Fireworks", "kind": "fireworks", "valid": False,
+                "status": info.get("status"), "error": info.get("body")}
     ids = [m["id"] for m in (data.get("data", []) if isinstance(data, dict) else [])][:80]
     return {"provider": "Fireworks", "kind": "fireworks", "valid": True, "models": ids, "limits": {}}
 
@@ -189,6 +204,12 @@ async def _nvidia(session, key):
                                    headers={"Authorization": f"Bearer {key}"})
     if s != 200:
         return {"provider": "NVIDIA NIM", "kind": "nvidia", "valid": False, "status": s, "error": data}
+    # NVIDIA's /v1/models is public — confirm via an authenticated chat call
+    ok, info = await _verify_auth(session, "https://integrate.api.nvidia.com/v1", key,
+                                  "meta/llama-3.1-8b-instruct")
+    if not ok:
+        return {"provider": "NVIDIA NIM", "kind": "nvidia", "valid": False,
+                "status": info.get("status"), "error": info.get("body")}
     ids = [m["id"] for m in data.get("data", [])][:80]
     return {"provider": "NVIDIA NIM", "kind": "nvidia", "valid": True, "models": ids, "limits": {}}
 
