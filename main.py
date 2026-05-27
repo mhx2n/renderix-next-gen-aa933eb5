@@ -8,8 +8,10 @@ Single entrypoint for Render Web Service and VPS.
 """
 import asyncio
 import logging
+import logging
 import sys
 
+from telegram.error import Conflict
 from telegram.ext import ApplicationBuilder
 
 from bot.config import BOT_TOKEN, PORT
@@ -29,6 +31,16 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.INFO)
 
 log = logging.getLogger("main")
+
+
+def _polling_error_callback(exc):
+    if isinstance(exc, Conflict):
+        log.critical(
+            "Telegram polling conflict detected: another bot instance is already using getUpdates. "
+            "Stopping this instance to avoid endless crash loops."
+        )
+        return
+    log.error("Polling error: %s", exc)
 
 
 async def _amain():
@@ -62,6 +74,7 @@ async def _amain():
         allowed_updates=[
             "message", "callback_query", "edited_message", "inline_query",
         ],
+        error_callback=_polling_error_callback,
     )
     log.info("Polling started. Press Ctrl+C to stop.")
 
