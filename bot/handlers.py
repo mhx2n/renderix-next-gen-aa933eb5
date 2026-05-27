@@ -1274,7 +1274,18 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 3) Auto-detect video URLs and offer download
     url = downloader.detect_url(text)
     if url and not text.startswith(("/", ".")):
-        await _run_download(update, context, url); return
+        # Offer video/audio choice via inline buttons.
+        token = uuid4().hex[:10]
+        context.application.bot_data.setdefault("dl_urls", {})[token] = url
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🎬 Video", callback_data=f"dlx:v:{token}"),
+            InlineKeyboardButton("🎵 Audio", callback_data=f"dlx:a:{token}"),
+        ]])
+        await msg.reply_text(
+            f"Detected a link. What do you want to download?\n<code>{escape_html(url[:200])}</code>",
+            parse_mode=ParseMode.HTML, reply_markup=kb,
+        )
+        return
 
     # 4) Reply-to-bot continuation
     if msg.reply_to_message and msg.reply_to_message.from_user \
