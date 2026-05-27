@@ -29,6 +29,8 @@ _HISTORY: dict = defaultdict(list)
 _PENDING_KEY: dict = {}     # user_id -> last inspected api key
 _AWAIT_INPUT: dict = {}     # user_id -> ("key"|"download"|"tryke"|"announce"|"speak_to"|"grant"|"revoke")
 _DOWNLOAD_SEM = asyncio.Semaphore(1)  # keep free hosting stable: one download at a time
+_DOWNLOAD_QUEUE = 0
+_DOWNLOAD_QUEUE_LOCK = asyncio.Lock()
 _PROCESS_STARTED_AT = int(time.time())
 
 
@@ -558,9 +560,12 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         url: str, audio_only: bool = False):
     chat_id = update.effective_chat.id
     kind = "audio" if audio_only else "video"
-    waiting_now = max(0, 1 - _DOWNLOAD_SEM._value)
+    global _DOWNLOAD_QUEUE
+    async with _DOWNLOAD_QUEUE_LOCK:
+        _DOWNLOAD_QUEUE += 1
+        queue_position = _DOWNLOAD_QUEUE
     status = await update.effective_message.reply_text(
-        f"Queued for {kind} download…\nQueue ahead: {waiting_now}"
+        f"Queued for {kind} download…\nAhead of you: {max(0, queue_position - 1)}"
     )
     info = None
     loop = asyncio.get_running_loop()
@@ -598,11 +603,11 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
         asyncio.run_coroutine_threadsafe(_do(), loop)
 
     try:
-        if waiting_now:
+        if queue_position > 1:
             try:
                 await status.edit_text(
                     f"Queued for {kind} download…\n"
-                    f"Queue ahead: {waiting_now}\n"
+                    f"Ahead of you: {queue_position - 1}\n"
                     "Your file will start automatically in order."
                 )
             except Exception:
@@ -657,6 +662,8 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
         except Exception: pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {e}")
     finally:
+        async with _DOWNLOAD_QUEUE_LOCK:
+            _DOWNLOAD_QUEUE = max(0, _DOWNLOAD_QUEUE - 1)
         if info: downloader.cleanup(info)
 
 
