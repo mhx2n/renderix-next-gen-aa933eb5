@@ -368,18 +368,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_ok(update, context):
         return
     name = escape_html(update.effective_user.first_name or "there")
-    txt = (
-        f"*Welcome, {name}.*\n\n"
-        "Command-based bot.\n"
-        "• AI only works with commands like /g, /pr, /co\n"
-        "• Downloader only supports Facebook, Instagram, TikTok\n"
-        "• Plain text messages do nothing\n\n"
-        "Tap a button below to see commands."
-    )
-    await update.effective_message.reply_text(
-        txt, parse_mode=ParseMode.MARKDOWN,
-        reply_markup=await main_menu_kb(update.effective_user.id),
-    )
+    template = await get_ui_welcome()
+    try:
+        txt = template.replace("{name}", name)
+    except Exception:
+        txt = template
+    try:
+        await update.effective_message.reply_text(
+            txt, parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=await main_menu_kb(update.effective_user.id),
+        )
+    except Exception:
+        await update.effective_message.reply_text(
+            clean_text(txt),
+            reply_markup=await main_menu_kb(update.effective_user.id),
+        )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
