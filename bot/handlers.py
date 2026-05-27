@@ -1132,6 +1132,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _AWAIT_INPUT[uid] = ("download", None)
         await q.edit_message_text("Send the video URL now.", reply_markup=back_home_kb()); return
 
+    if data.startswith("dlx:"):
+        try:
+            _, kind, token = data.split(":", 2)
+        except ValueError:
+            return
+        urls = context.application.bot_data.get("dl_urls", {})
+        url = urls.pop(token, None)
+        if not url:
+            await q.edit_message_text("This link expired. Send it again."); return
+        await q.edit_message_text(f"Starting {('audio' if kind=='a' else 'video')} download…")
+        await _run_download(update, context, url, audio_only=(kind == "a"))
+        return
+
     # Owner sub-actions
     if data.startswith("ow:"):
         if not is_owner(uid): return
