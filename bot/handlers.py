@@ -1605,6 +1605,63 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if kind == "setchannel":
             context.args = [text.split()[0]]
             await cmd_setchannel(update, context); return
+        if kind == "cust_welcome":
+            if text.strip().lower() == "reset":
+                await db.set_setting("ui_welcome", "")
+                await msg.reply_text("Welcome text reset to default.")
+            else:
+                await db.set_setting("ui_welcome", text)
+                await msg.reply_text("Welcome text updated. Tap /start to preview.")
+            return
+        if kind == "cust_label":
+            parts = text.split(None, 1)
+            if len(parts) < 2:
+                await msg.reply_text("Format: <cmd> <new label>"); return
+            cmd, new = parts[0].lstrip("/.").lower(), parts[1].strip()
+            if not _find_tool(cmd)[1]:
+                await msg.reply_text(f"Unknown command: /{cmd}"); return
+            labels = await get_ui_labels()
+            if new.lower() == "reset":
+                labels.pop(cmd, None)
+                await msg.reply_text(f"Label for /{cmd} reset.")
+            else:
+                labels[cmd] = new[:48]
+                await msg.reply_text(f"Label for /{cmd} set to: {new[:48]}")
+            await _set_json_setting("ui_labels", labels)
+            return
+        if kind == "cust_emoji":
+            parts = text.split(None, 1)
+            if len(parts) < 2:
+                await msg.reply_text("Format: <cmd> <emoji>"); return
+            cmd, em = parts[0].lstrip("/.").lower(), parts[1].strip()
+            if not _find_tool(cmd)[1]:
+                await msg.reply_text(f"Unknown command: /{cmd}"); return
+            emojis = await get_ui_emojis()
+            if em.lower() == "off":
+                emojis.pop(cmd, None)
+                await msg.reply_text(f"Emoji for /{cmd} removed.")
+            else:
+                emojis[cmd] = em[:8]
+                await msg.reply_text(f"Emoji for /{cmd} set to: {em[:8]}")
+            await _set_json_setting("ui_emojis", emojis)
+            return
+        if kind == "cust_cat":
+            if "|" not in text:
+                await msg.reply_text("Format: <category> | <new label>"); return
+            old, new = [p.strip() for p in text.split("|", 1)]
+            if old not in TOOL_CATALOG:
+                await msg.reply_text(
+                    "Unknown category. Use one of: " + ", ".join(TOOL_CATALOG.keys())
+                ); return
+            cats = await get_ui_cat_labels()
+            if new.lower() == "reset" or not new:
+                cats.pop(old, None)
+                await msg.reply_text(f"Category '{old}' reset.")
+            else:
+                cats[old] = new[:48]
+                await msg.reply_text(f"Category '{old}' renamed to: {new[:48]}")
+            await _set_json_setting("ui_cat_labels", cats)
+            return
 
     # 2) Owner/granted speak-as-bot forward
     target = await db.get_speak_target(uid)
