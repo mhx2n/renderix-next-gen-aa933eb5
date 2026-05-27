@@ -1182,10 +1182,11 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     from .keycheck import _detect, inspect_key
     kind = (_PENDING_KIND.get(uid) or "").lower()
-    if not kind or kind not in _PROVIDER_BASE_URLS:
+    _SUPPORTED = set(_PROVIDER_BASE_URLS) | {"anthropic", "gemini"}
+    if not kind or kind not in _SUPPORTED:
         # detection fallback: prefix sniff
         guess = _detect(key)
-        if guess in _PROVIDER_BASE_URLS:
+        if guess in _SUPPORTED:
             kind = guess
         else:
             # last resort: live probe via inspect_key (handles ambiguous_sk / unknown)
@@ -1196,13 +1197,13 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     _PENDING_KIND[uid] = kind
             except Exception:
                 pass
-    base_url = _PROVIDER_BASE_URLS.get(kind)
-    if not base_url:
+    base_url = _PROVIDER_BASE_URLS.get(kind)  # None for anthropic/gemini (handled below)
+    if kind not in _SUPPORTED:
         await update.effective_message.reply_text(
             "Couldn't auto-detect this key's provider. Run /key again with the key, "
             "then retry /addmodel.\n"
             "Supported: OpenAI, Groq, OpenRouter, DeepSeek, xAI, Together AI, Cohere, "
-            "Mistral, Perplexity, Fireworks, NVIDIA."
+            "Mistral, Perplexity, Fireworks, NVIDIA, Anthropic, Google Gemini."
         )
         return
 
@@ -1231,9 +1232,9 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     try:
-        func = make_openai_compatible_provider(name, base_url, key, model)
+        func, stored_base = make_provider(kind, name, key, model, base_url=base_url)
         register_provider(alias, name, func)
-        await db.add_custom_provider(alias, name, base_url, key, model)
+        await db.add_custom_provider(alias, name, stored_base, key, model)
         try:
             context.application.add_handler(CommandHandler(alias, make_provider_handler(alias)))
         except Exception:
