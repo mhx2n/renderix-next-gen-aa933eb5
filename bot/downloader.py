@@ -306,47 +306,37 @@ def _ydl_base(url: str) -> dict:
             "User-Agent": _UA_DESKTOP,
             "Accept-Language": "en-US,en;q=0.9",
         },
+        "extractor_retries": 2,
     }
     platform = platform_from_url(url)
-    if platform == "youtube":
-        opts["http_headers"]["User-Agent"] = _UA_IOS
-        opts["extract_flat"] = False
-        opts["extractor_args"] = {
-            "youtube": {
-                "player_client": ["ios", "mweb", "tv_embedded", "web_safari"],
-                "player_skip": ["configs"],
-            },
-        }
-        cookies = _cookies_path()
-        if cookies:
-            opts["cookiefile"] = cookies
-            opts["http_headers"]["User-Agent"] = _UA_DESKTOP
-    elif platform == "tiktok":
+    if platform == "tiktok":
         opts["http_headers"].update({
             "Referer": "https://www.tiktok.com/",
             "Origin": "https://www.tiktok.com",
         })
+    elif platform in {"facebook", "instagram"}:
+        opts["http_headers"].update({
+            "Referer": f"https://www.{platform}.com/",
+        })
+        opts["format_sort"] = [
+            "hasvid",
+            "quality",
+            "res",
+            "fps",
+            "vcodec:h264",
+            "acodec:aac",
+            "ext:mp4:m4a",
+        ]
     return opts
 
 
 # Format ladder (descending preference). Each tier stays under MAX_BYTES.
 _FORMAT_LADDER = [
-    # Tier 1: best compact mp4 under cap
-    f"bv*[ext=mp4][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]"
-    f"+ba[ext=m4a][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]/"
-    f"b[ext=mp4][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
-    # Tier 2: any combo under cap
-    f"bv*[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]"
-    f"+ba[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]/"
-    f"b[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
-    # Tier 3: capped height
-    "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/"
-    "bv*[height<=720]+ba/b[height<=720]",
-    # Tier 4: even smaller
-    "bv*[height<=480]+ba/b[height<=480]/best[height<=480]",
-    # Tier 5: anything that works
+    f"best[ext=mp4][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
+    f"best[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
+    "best[ext=mp4]/best",
+    "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]",
     "bv*+ba/b",
-    # Tier 6: generic best without forcing separate streams
     "best",
 ]
 
