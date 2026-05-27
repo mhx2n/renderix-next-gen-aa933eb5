@@ -26,6 +26,7 @@ import yt_dlp
 
 # Telegram bot upload cap (~50 MB for regular bots)
 MAX_BYTES = 49 * 1024 * 1024
+_VIDEO_PROBE_TIMEOUT = 20
 
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 # We rely on yt-dlp's 1000+ supported sites. Any http(s) URL is accepted;
@@ -128,6 +129,37 @@ def _run_ffmpeg(args: list[str], timeout: int = 240) -> None:
         raise RuntimeError(err or "ffmpeg failed")
 
 
+def _probe_media(path: str) -> dict:
+    proc = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,width,height,pix_fmt",
+            "-of", "default=noprint_wrappers=1:nokey=0",
+            path,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=_VIDEO_PROBE_TIMEOUT,
+        check=False,
+    )
+    data: dict[str, str | int] = {}
+    if proc.returncode != 0:
+        return data
+    for line in proc.stdout.decode("utf-8", errors="ignore").splitlines():
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        if k in {"width", "height"}:
+            try:
+                data[k] = int(v)
+            except Exception:
+                pass
+        else:
+            data[k] = v.strip()
+    return data
+
+
 def _ensure_telegram_media(path: str, audio_only: bool) -> str:
     """Convert/remux media to Telegram-friendly formats when needed."""
     if not path or not os.path.exists(path):
@@ -146,26 +178,51 @@ def _ensure_telegram_media(path: str, audio_only: bool) -> str:
             target,
         ], timeout=180)
     else:
-        if ext in {".mp4", ".m4v", ".mov"}:
-            try:
-                faststart = base + ".tg.mp4"
-                _run_ffmpeg([
-                    "ffmpeg", "-y", "-i", path,
-                    "-c", "copy", "-movflags", "+faststart",
-                    faststart,
-                ], timeout=180)
-                target = faststart
-            except Exception:
-                return path
-        else:
+        meta = _probe_media(path)
+        needs_full_transcode = (
+            ext not in {".mp4", ".m4v", ".mov"}
+            or meta.get("codec_name") != "h264"
+            or meta.get("pix_fmt") != "yuv420p"
+            or not meta.get("width")
+            or not meta.get("height")
+        )
+        if needs_full_transcode:
             target = base + ".mp4"
             _run_ffmpeg([
                 "ffmpeg", "-y", "-i", path,
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
-                "-c:a", "aac", "-b:a", "128k",
+                "-map", "0:v:0", "-map", "0:a:0?",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+                "-pix_fmt", "yuv420p",
+                "-profile:v", "baseline",
+                "-level", "3.1",
+                "-c:a", "aac", "-ac", "2", "-b:a", "128k",
                 "-movflags", "+faststart",
                 target,
             ], timeout=300)
+        else:
+            target = base + ".tg.mp4"
+            try:
+                _run_ffmpeg([
+                    "ffmpeg", "-y", "-i", path,
+                    "-map", "0:v:0", "-map", "0:a:0?",
+                    "-c:v", "copy",
+                    "-c:a", "aac", "-ac", "2", "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    target,
+                ], timeout=240)
+            except Exception:
+                target = base + ".recode.mp4"
+                _run_ffmpeg([
+                    "ffmpeg", "-y", "-i", path,
+                    "-map", "0:v:0", "-map", "0:a:0?",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+                    "-pix_fmt", "yuv420p",
+                    "-profile:v", "baseline",
+                    "-level", "3.1",
+                    "-c:a", "aac", "-ac", "2", "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    target,
+                ], timeout=300)
 
     if not os.path.exists(target):
         return path
@@ -203,15 +260,17 @@ def _ydl_base(url: str) -> dict:
     platform = platform_from_url(url)
     if platform == "youtube":
         opts["http_headers"]["User-Agent"] = _UA_IOS
+        opts["extract_flat"] = False
         opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["tv_embedded", "ios", "mweb", "web_safari"],
+                "player_client": ["ios", "mweb", "tv_embedded", "web_safari"],
                 "player_skip": ["configs"],
             },
         }
         cookies = _cookies_path()
         if cookies:
             opts["cookiefile"] = cookies
+            opts["http_headers"]["User-Agent"] = _UA_DESKTOP
     elif platform == "tiktok":
         opts["http_headers"].update({
             "Referer": "https://www.tiktok.com/",
