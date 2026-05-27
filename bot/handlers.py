@@ -1289,10 +1289,6 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     uid = update.effective_user.id
 
-    if not text.startswith(("/", ".")) and not downloader.detect_url(text) and "g" in REGISTRY:
-        await _call_provider(update, context, "g", text)
-        return
-
     # 1) Awaiting structured input
     awaiting = _AWAIT_INPUT.pop(uid, None)
     if awaiting:
@@ -1362,6 +1358,11 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rep_text = (msg.reply_to_message.text or msg.reply_to_message.caption or "").strip()
         if rep_text and "g" in REGISTRY:
             await _call_provider(update, context, "g", text); return
+
+    # 4c) Plain text question without command → answer with default provider
+    if not text.startswith(("/", ".")) and not downloader.detect_url(text) and "g" in REGISTRY:
+        await _call_provider(update, context, "g", text)
+        return
 
     # 5) Dot-prefix commands
     if text.startswith("."):
