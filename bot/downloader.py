@@ -124,7 +124,15 @@ def _extract_share_target(url: str) -> str:
     """Best-effort expansion for short/share links before yt-dlp touches them."""
     normalized = _normalize_url(url)
     low = (normalized or "").lower()
-    if "facebook.com/share/" not in low and "fb.watch/" not in low:
+    if not any(marker in low for marker in (
+        "facebook.com/share/",
+        "facebook.com/reel/",
+        "facebook.com/reels/",
+        "fb.watch/",
+        "instagram.com/share/",
+        "instagram.com/reel/",
+        "instagram.com/reels/",
+    )):
         return normalized
     try:
         resp = requests.get(
@@ -237,7 +245,7 @@ def _ensure_telegram_media(path: str, audio_only: bool) -> str:
             or not meta.get("height")
         )
         if needs_full_transcode:
-            target = base + ".mp4"
+            target = base + ".fixed.mp4"
             _run_ffmpeg([
                 "ffmpeg", "-y", "-i", path,
                 "-map", "0:v:0", "-map", "0:a:0?",
