@@ -27,10 +27,8 @@ import yt_dlp
 MAX_BYTES = 49 * 1024 * 1024
 
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-SUPPORTED_HOSTS = (
-    "youtube.com", "youtu.be", "facebook.com", "fb.watch",
-    "instagram.com", "tiktok.com", "vt.tiktok.com", "twitter.com", "x.com",
-)
+# We rely on yt-dlp's 1000+ supported sites. Any http(s) URL is accepted;
+# yt-dlp will reject truly unsupported ones with a clear error.
 
 _UA_IOS = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
@@ -53,11 +51,9 @@ def detect_url(text: str) -> Optional[str]:
         return None
     url = m.group(0).rstrip(").,]>")
     host = (urlparse(url).netloc or "").lower()
-    if host.startswith("www."):
-        host = host[4:]
-    if any(host == h or host.endswith(f".{h}") for h in SUPPORTED_HOSTS):
-        return url
-    return None
+    if not host:
+        return None
+    return url
 
 
 def _cookies_path() -> Optional[str]:
