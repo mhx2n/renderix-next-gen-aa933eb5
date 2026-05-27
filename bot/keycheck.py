@@ -257,6 +257,10 @@ async def try_model(key: str, model: str, prompt: str) -> str:
             "xai": "https://api.x.ai/v1",
             "together": "https://api.together.xyz/v1",
             "cohere": "https://api.cohere.com/compatibility/v1",
+            "mistral": "https://api.mistral.ai/v1",
+            "perplexity": "https://api.perplexity.ai",
+            "fireworks": "https://api.fireworks.ai/inference/v1",
+            "nvidia": "https://integrate.api.nvidia.com/v1",
         }.get(provider, "https://api.openai.com/v1")
         s, data, _ = await _fetch_json(session, "POST", f"{base}/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
