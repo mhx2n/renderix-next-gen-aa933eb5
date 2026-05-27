@@ -1372,6 +1372,7 @@ USER_COMMANDS = [
     BotCommand("key",   "Inspect an API key"),
     BotCommand("tryke", "Try a model with last key"),
     BotCommand("dl",    "Download YT/FB/IG/TikTok video"),
+    BotCommand("dla",   "Download audio-only (mp3)"),
     BotCommand("en",    "Encode text (Base64/Hex/Binary/…)"),
     BotCommand("de",    "Decode text from any format"),
     BotCommand("text",  "Transform text case/reverse"),
