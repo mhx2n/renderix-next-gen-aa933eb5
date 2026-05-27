@@ -1,0 +1,15 @@
+[Unit]
+Description=Advanced Multi-AI Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ai-multi-bot
+EnvironmentFile=/home/ubuntu/ai-multi-bot/.env
+ExecStart=/home/ubuntu/ai-multi-bot/venv/bin/python main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
