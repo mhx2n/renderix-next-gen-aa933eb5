@@ -338,8 +338,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "OpenRouter, Cohere, DeepSeek, xAI, Together AI. Then /tryke <model> <prompt>.\n"
         "Video Downloader: /dl <url> for YouTube, Facebook, Instagram, TikTok (under 50MB).\n"
         "Conversation: reply to any bot answer to continue with the same model.\n"
-        "Owner-only: /owner panel with stats, logs, broadcast, speak-as-bot, live-response toggle.\n"
         f"User asked: {args}\n"
+        "Do not mention owner/admin/private tools unless the user explicitly asks about admin features.\n"
         "Reply in the user's language, concise, organized with bullets. No emojis."
     )
     placeholder = await update.effective_message.reply_text("Thinking...")
@@ -634,6 +634,8 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
             caption = clean_text(
                 f"{info['title'] or 'Video'}\n{info['uploader']} • {human_size(info['size'])}"
             )[:900]
+            width = info.get("width") or None
+            height = info.get("height") or None
             with open(info["path"], "rb") as f:
                 if info.get("audio_only"):
                     await context.bot.send_audio(
@@ -648,6 +650,8 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         chat_id=chat_id, video=f, caption=caption,
                         supports_streaming=True,
                         duration=info.get("duration") or None,
+                        width=width,
+                        height=height,
                         write_timeout=240, read_timeout=240,
                     )
             try: await status.delete()
@@ -1354,6 +1358,11 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rep_text = (msg.reply_to_message.text or msg.reply_to_message.caption or "").strip()
         if rep_text and "g" in REGISTRY:
             await _call_provider(update, context, "g", text); return
+
+    # 4c) Plain text question without command → answer with default provider
+    if not text.startswith(("/", ".")) and not downloader.detect_url(text) and "g" in REGISTRY:
+        await _call_provider(update, context, "g", text)
+        return
 
     # 5) Dot-prefix commands
     if text.startswith("."):
