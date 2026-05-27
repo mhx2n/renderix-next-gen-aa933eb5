@@ -153,6 +153,21 @@ def _run_ffmpeg(args: list[str], timeout: int = 240) -> None:
         raise RuntimeError(err or "ffmpeg failed")
 
 
+def _looks_like_html(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            head = f.read(2048).lower()
+    except Exception:
+        return False
+    return any(marker in head for marker in (
+        b"<!doctype html",
+        b"<html",
+        b"<head",
+        b"<body",
+        b"facebook helps you connect",
+    ))
+
+
 def _probe_media(path: str) -> dict:
     proc = subprocess.run(
         [
@@ -188,6 +203,10 @@ def _ensure_telegram_media(path: str, audio_only: bool) -> str:
     """Convert/remux media to Telegram-friendly formats when needed."""
     if not path or not os.path.exists(path):
         return path
+    if _looks_like_html(path):
+        raise RuntimeError(
+            "Downloaded page instead of media stream. The site likely returned a login/consent page."
+        )
 
     base, ext = os.path.splitext(path)
     ext = ext.lower()
