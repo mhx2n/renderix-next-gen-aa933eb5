@@ -390,31 +390,49 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """If args given, use AI to summarize that feature/provider for the user."""
     if not await force_join_ok(update, context): return
     args = " ".join(context.args).strip() if context.args else ""
+    # Build dynamic list of currently-live commands (owner toggles respected).
+    disabled = await _disabled_set()
+    live_by_cat: dict = {}
+    for cat, items in TOOL_CATALOG.items():
+        live = [(c, label, doc) for c, label, doc in items if c not in disabled]
+        if live:
+            live_by_cat[cat] = live
+    # Built-in always-on basics
+    basics = [
+        ("start", "main menu (buttons)"),
+        ("menu",  "AI provider menu"),
+        ("ping",  "latency check"),
+        ("help",  "this help (add a topic for AI summary)"),
+    ]
+
     if not args:
-        lines = [
-            "*Help Center*\n",
-            "User commands:",
-            "/start  — main menu (buttons)",
-            "/menu   — AI provider menu",
-            "/key    — inspect API key",
-            "/dl <url>  — download video (FB/IG/TikTok)",
-            "/dla <url> — download audio mp3 (FB/IG/TikTok)",
-            "/ping   — latency",
-            "/help <topic>  — AI-summarized help on any topic\n",
-            "Plain text does nothing. Only /command or .command works.",
-        ]
+        lines = ["*Help Center*\n", "Basic commands:"]
+        for c, d in basics:
+            lines.append(f"/{c}  — {d}")
+        for cat, live in live_by_cat.items():
+            lines.append(f"\n*{cat}:*")
+            for c, label, _doc in live:
+                lines.append(f"/{c}  — {label}")
+        lines.append("\nPlain text does nothing. Only /command or .command works.")
         await send_md(update.effective_message, "\n".join(lines))
         return
-    # AI-summarized help
+
+    # AI-summarized help — feed only the live commands so AI never mentions disabled ones.
+    live_doc_lines = []
+    for cat, live in live_by_cat.items():
+        live_doc_lines.append(f"{cat}:")
+        for c, label, doc in live:
+            clean_doc = (doc or "").replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "")
+            live_doc_lines.append(f"  /{c} — {label}: {clean_doc[:160]}")
+    live_doc = "\n".join(live_doc_lines) if live_doc_lines else "(no tools currently enabled)"
     feature_doc = (
-        "You are the in-bot help assistant. Summarize ONLY what THIS bot offers:\n"
-        "Providers: Gemini (.g), Perplexity (.pr), Copilot (.co) — free, no key needed.\n"
-        "API Key Inspector: /key <KEY> works for OpenAI, Anthropic, Gemini, Groq, "
-        "OpenRouter, Cohere, DeepSeek, xAI, Together AI. Then /tryke <model> <prompt>.\n"
-        "Video Downloader: /dl <url> and /dla <url> for Facebook, Instagram, TikTok only (under 50MB).\n"
-        "Plain text without / or . command must do nothing.\n"
+        "You are the in-bot help assistant. Summarize ONLY the commands listed below.\n"
+        "Do NOT invent, assume, or mention any command that is not in this list.\n"
+        "If the user asks about something not listed, say it is not available right now.\n"
+        "Never mention owner/admin/private tools.\n\n"
+        "CURRENTLY AVAILABLE COMMANDS:\n"
+        f"{live_doc}\n\n"
         f"User asked: {args}\n"
-        "Never mention owner/admin/private tools, even if the user asks.\n"
         "Reply in the user's language, concise, organized with bullets. No emojis."
     )
     placeholder = await update.effective_message.reply_text("Thinking...")
