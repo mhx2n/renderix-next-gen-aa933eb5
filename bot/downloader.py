@@ -29,8 +29,12 @@ MAX_BYTES = 49 * 1024 * 1024
 _VIDEO_PROBE_TIMEOUT = 20
 
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-# We rely on yt-dlp's 1000+ supported sites. Any http(s) URL is accepted;
-# yt-dlp will reject truly unsupported ones with a clear error.
+_SUPPORTED_HOSTS = (
+    "facebook.com",
+    "fb.watch",
+    "instagram.com",
+    "tiktok.com",
+)
 
 _UA_IOS = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
@@ -55,6 +59,10 @@ def detect_url(text: str) -> Optional[str]:
     host = (urlparse(url).netloc or "").lower()
     if not host:
         return None
+    if host.startswith("www."):
+        host = host[4:]
+    if not any(host == allowed or host.endswith(f".{allowed}") for allowed in _SUPPORTED_HOSTS):
+        return None
     return url
 
 
@@ -73,16 +81,12 @@ def platform_from_url(url: str) -> str:
     host = (urlparse(url or "").netloc or "").lower()
     if host.startswith("www."):
         host = host[4:]
-    if host.endswith("youtube.com") or host == "youtu.be":
-        return "youtube"
     if host.endswith("tiktok.com"):
         return "tiktok"
     if host.endswith("instagram.com"):
         return "instagram"
     if host.endswith("facebook.com") or host == "fb.watch":
         return "facebook"
-    if host.endswith("twitter.com") or host == "x.com":
-        return "twitter"
     return "generic"
 
 
@@ -120,7 +124,15 @@ def _extract_share_target(url: str) -> str:
     """Best-effort expansion for short/share links before yt-dlp touches them."""
     normalized = _normalize_url(url)
     low = (normalized or "").lower()
-    if "facebook.com/share/" not in low and "fb.watch/" not in low:
+    if not any(marker in low for marker in (
+        "facebook.com/share/",
+        "facebook.com/reel/",
+        "facebook.com/reels/",
+        "fb.watch/",
+        "instagram.com/share/",
+        "instagram.com/reel/",
+        "instagram.com/reels/",
+    )):
         return normalized
     try:
         resp = requests.get(
@@ -233,7 +245,7 @@ def _ensure_telegram_media(path: str, audio_only: bool) -> str:
             or not meta.get("height")
         )
         if needs_full_transcode:
-            target = base + ".mp4"
+            target = base + ".fixed.mp4"
             _run_ffmpeg([
                 "ffmpeg", "-y", "-i", path,
                 "-map", "0:v:0", "-map", "0:a:0?",
@@ -302,47 +314,37 @@ def _ydl_base(url: str) -> dict:
             "User-Agent": _UA_DESKTOP,
             "Accept-Language": "en-US,en;q=0.9",
         },
+        "extractor_retries": 2,
     }
     platform = platform_from_url(url)
-    if platform == "youtube":
-        opts["http_headers"]["User-Agent"] = _UA_IOS
-        opts["extract_flat"] = False
-        opts["extractor_args"] = {
-            "youtube": {
-                "player_client": ["ios", "mweb", "tv_embedded", "web_safari"],
-                "player_skip": ["configs"],
-            },
-        }
-        cookies = _cookies_path()
-        if cookies:
-            opts["cookiefile"] = cookies
-            opts["http_headers"]["User-Agent"] = _UA_DESKTOP
-    elif platform == "tiktok":
+    if platform == "tiktok":
         opts["http_headers"].update({
             "Referer": "https://www.tiktok.com/",
             "Origin": "https://www.tiktok.com",
         })
+    elif platform in {"facebook", "instagram"}:
+        opts["http_headers"].update({
+            "Referer": f"https://www.{platform}.com/",
+        })
+        opts["format_sort"] = [
+            "hasvid",
+            "quality",
+            "res",
+            "fps",
+            "vcodec:h264",
+            "acodec:aac",
+            "ext:mp4:m4a",
+        ]
     return opts
 
 
 # Format ladder (descending preference). Each tier stays under MAX_BYTES.
 _FORMAT_LADDER = [
-    # Tier 1: best compact mp4 under cap
-    f"bv*[ext=mp4][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]"
-    f"+ba[ext=m4a][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]/"
-    f"b[ext=mp4][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
-    # Tier 2: any combo under cap
-    f"bv*[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]"
-    f"+ba[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]/"
-    f"b[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
-    # Tier 3: capped height
-    "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/"
-    "bv*[height<=720]+ba/b[height<=720]",
-    # Tier 4: even smaller
-    "bv*[height<=480]+ba/b[height<=480]/best[height<=480]",
-    # Tier 5: anything that works
+    f"best[ext=mp4][filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
+    f"best[filesize<=?{MAX_BYTES}][filesize_approx<=?{MAX_BYTES}]",
+    "best[ext=mp4]/best",
+    "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]",
     "bv*+ba/b",
-    # Tier 6: generic best without forcing separate streams
     "best",
 ]
 
@@ -466,6 +468,8 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
     url = _extract_share_target(url)
     outtmpl = os.path.join(workdir, "%(id).40s.%(ext)s")
     platform = platform_from_url(url)
+    if platform == "generic":
+        raise RuntimeError("[generic] Only Facebook, Instagram, and TikTok links are allowed.")
 
     # TikTok: try tikwm.com first — it bypasses most yt-dlp issues.
     if platform == "tiktok":
@@ -551,15 +555,15 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
             if "max-filesize" in msg or "file is larger" in msg \
                or "requested format is not available" in msg:
                 continue
-            if platform == "facebook" and (
+            if platform in {"facebook", "instagram"} and (
                 "cannot parse data" in msg
                 or "no video formats found" in msg
                 or "requested format is not available" in msg
             ):
                 raise RuntimeError(
-                    "[facebook] Facebook blocked or hid the reel/video stream for this server. "
-                    "Open the share link once in a browser and resend the final public reel/watch URL. "
-                    "If it still fails, the owner must provide fresh Facebook cookies to yt-dlp."
+                    f"[{platform}] {platform.title()} blocked or hid the reel/video stream for this server. "
+                    "Open the link once in a browser and resend the final public reel URL. "
+                    f"If it still fails, the owner must provide fresh {platform.title()} cookies to yt-dlp."
                 )
             # bot-check / auth → no point hammering further tiers
             if "sign in to confirm" in msg or "login required" in msg \
@@ -678,14 +682,14 @@ def user_error_text(err: Exception) -> str:
             )
     if "login required" in low or "private" in low:
         return "This post is private or requires login."
-    if platform == "facebook" and (
+    if platform in {"facebook", "instagram"} and (
         "cannot parse data" in low
         or "no video formats found" in low
-        or "facebook blocked or hid" in low
+        or "blocked or hid" in low
     ):
         return (
-            "Facebook share/reel link টি server থেকে playable stream দিচ্ছে না।\n"
-            "Final public reel/watch URL পাঠান। যদি তবুও fail করে, owner-কে fresh Facebook cookies যোগ করতে হবে।"
+            f"{platform.title()} reel/video link টি server থেকে playable stream দিচ্ছে না।\n"
+            f"Final public reel URL পাঠান। যদি তবুও fail করে, owner-কে fresh {platform.title()} cookies যোগ করতে হবে।"
         )
     if "age" in low and "restricted" in low:
         return "Age-restricted content cannot be downloaded without login."
@@ -700,8 +704,8 @@ def user_error_text(err: Exception) -> str:
         return "This link did not expose a downloadable video stream."
     if "timed out" in low or "timeout" in low:
         return "The remote site took too long to respond. Please try again."
-    if "unsupported url" in low:
-        return "This site is not supported."
+    if "only facebook, instagram, and tiktok links are allowed" in low or "unsupported url" in low:
+        return "Only Facebook, Instagram, and TikTok links are supported in this bot."
     return "Download failed. Please try another link or try again later."
 
 

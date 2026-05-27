@@ -126,7 +126,7 @@ async def stream_edit(message, text: str, reply_markup=None):
 # ============================================================
 TOOL_CATALOG: dict = {
     "AI Tools": [
-        ("g",     "Gemini",       "Chat with Google Gemini.\n\n<b>Usage:</b>\n<code>/g your question</code>  or  <code>.g your question</code>\nReply to my answer to continue."),
+        ("g",     "Gemini",       "Chat with Google Gemini.\n\n<b>Usage:</b>\n<code>/g your question</code>  or  <code>.g your question</code>"),
         ("pr",    "Perplexity",   "Chat with Perplexity AI.\n\n<b>Usage:</b>\n<code>/pr your question</code>  or  <code>.pr ...</code>"),
         ("co",    "Copilot",      "Chat with Microsoft Copilot.\n\n<b>Usage:</b>\n<code>/co your question</code>  or  <code>.co ...</code>"),
         ("key",   "API Key Inspector", "Inspect any AI API key (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Cohere, DeepSeek, xAI, Together AI).\n\n<b>Usage:</b>\n<code>/key &lt;API_KEY&gt;</code>"),
@@ -153,8 +153,8 @@ TOOL_CATALOG: dict = {
         ("res",   "Resize",       "Resize to popular presets (YouTube, Instagram, Twitter, HD, 4K).\n\n<b>Usage:</b> Reply to a photo with <code>/res</code>, then pick a preset."),
     ],
     "Utilities": [
-        ("dl",    "Video Downloader","Download from YouTube, Facebook, Instagram, TikTok, 1000+ sites (max 50MB).\n\n<b>Usage:</b> <code>/dl &lt;url&gt;</code> or just send the URL."),
-        ("dla",   "Audio Downloader","Extract audio (mp3) from any supported video link.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
+        ("dl",    "Video Downloader","Download high-quality playable video from Facebook, Instagram, and TikTok only (max 50MB).\n\n<b>Usage:</b> <code>/dl &lt;url&gt;</code>"),
+        ("dla",   "Audio Downloader","Extract audio (mp3) from Facebook, Instagram, and TikTok links only.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
         ("short", "URL Shortener","Shorten any URL.\n\n<b>Usage:</b>\n<code>/short https://example.com/path</code>"),
         ("ping",  "Ping",         "Bot latency check.\n\n<b>Usage:</b> <code>/ping</code>"),
         ("help",  "Help / About", "AI-summarised help.\n\n<b>Usage:</b>\n<code>/help</code> or <code>/help &lt;topic&gt;</code>"),
@@ -300,11 +300,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = escape_html(update.effective_user.first_name or "there")
     txt = (
         f"*Welcome, {name}.*\n\n"
-        "Advanced multi-AI assistant.\n"
-        "• Chat with multiple AI providers\n"
-        "• Inspect any AI API key (status, models, limits)\n"
-        "• Download videos from YouTube, Facebook, Instagram, TikTok\n\n"
-        "Tap a button below to begin."
+        "Command-based bot.\n"
+        "• AI only works with commands like /g, /pr, /co\n"
+        "• Downloader only supports Facebook, Instagram, TikTok\n"
+        "• Plain text messages do nothing\n\n"
+        "Tap a button below to see commands."
     )
     await update.effective_message.reply_text(
         txt, parse_mode=ParseMode.MARKDOWN,
@@ -323,10 +323,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/start  — main menu (buttons)",
             "/menu   — AI provider menu",
             "/key    — inspect API key",
-            "/dl <url>  — download video (YT/FB/IG/TikTok)",
+            "/dl <url>  — download video (FB/IG/TikTok)",
+            "/dla <url> — download audio mp3 (FB/IG/TikTok)",
             "/ping   — latency",
             "/help <topic>  — AI-summarized help on any topic\n",
-            "Tip: reply to any bot answer to continue that chat.",
+            "Plain text does nothing. Only /command or .command works.",
         ]
         await send_md(update.effective_message, "\n".join(lines))
         return
@@ -336,8 +337,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Providers: Gemini (.g), Perplexity (.pr), Copilot (.co) — free, no key needed.\n"
         "API Key Inspector: /key <KEY> works for OpenAI, Anthropic, Gemini, Groq, "
         "OpenRouter, Cohere, DeepSeek, xAI, Together AI. Then /tryke <model> <prompt>.\n"
-        "Video Downloader: /dl <url> for YouTube, Facebook, Instagram, TikTok (under 50MB).\n"
-        "Conversation: reply to any bot answer to continue with the same model.\n"
+        "Video Downloader: /dl <url> and /dla <url> for Facebook, Instagram, TikTok only (under 50MB).\n"
+        "Plain text without / or . command must do nothing.\n"
         f"User asked: {args}\n"
         "Never mention owner/admin/private tools, even if the user asks.\n"
         "Reply in the user's language, concise, organized with bullets. No emojis."
@@ -442,7 +443,14 @@ async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
         await db.log("ERROR", update.effective_user.id, provider_key, "timeout")
     except Exception as e:
         tb = traceback.format_exc(limit=2)
-        msg = f"{name} error.\n\n`{e}`"
+        err_text = str(e)
+        if provider_key == "pr" and ("Perplexity HTTP 403" in err_text or "HTTP 403" in err_text):
+            msg = (
+                "Perplexity is blocking requests from this server right now.\n\n"
+                "Use /g or /co for now, or add fresh Perplexity browser cookies / a browser-backed proxy on the server."
+            )
+        else:
+            msg = f"{name} error.\n\n`{e}`"
         if placeholder: await safe_edit(placeholder, msg)
         else: await send_md(update.effective_message, msg)
         await db.log("ERROR", update.effective_user.id, provider_key, f"{e}\n{tb}")
@@ -537,7 +545,7 @@ async def cmd_dl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not url or not url.startswith("http"):
         _AWAIT_INPUT[update.effective_user.id] = ("download", None)
         await update.effective_message.reply_text(
-            "Send the video URL now. The bot will auto-detect the site and download the best playable format."
+            "Send a Facebook, Instagram, or TikTok video URL now."
         )
         return
     await _run_download(update, context, url)
@@ -550,7 +558,7 @@ async def cmd_dla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = downloader.detect_url(text) or text
     if not url or not url.startswith("http"):
         await update.effective_message.reply_text(
-            "Usage: /dla <url> — downloads audio in MP3 format when possible."
+            "Usage: /dla <url> — Facebook, Instagram, or TikTok only."
         )
         return
     await _run_download(update, context, url, audio_only=True)
@@ -1128,13 +1136,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("API key tools:", reply_markup=keytools_kb()); return
     if data == "m:dl":
         await q.edit_message_text(
-            "*Video Downloader*\n\nSupports YouTube, Facebook, Instagram, TikTok.\n"
-            "Max 50MB. Send the URL after tapping below.",
+            "*Video Downloader*\n\nSupports Facebook, Instagram, TikTok only.\n"
+            "Max 50MB. Use /dl for video and /dla for audio.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=dl_kb()); return
     if data == "m:help":
         await q.edit_message_text(
             "*Help*\n\nUse the buttons in the main menu, or these commands:\n"
-            "/key, /tryke, /dl, /menu, /ping, /help <topic>",
+            "/key, /tryke, /dl, /dla, /menu, /ping, /help <topic>\n\nPlain text does nothing.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=back_home_kb()); return
     if data == "m:owner":
         if not is_owner(uid): return
@@ -1146,7 +1154,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(
             f"*Selected: {name}*\n\n"
             f"Send: `.{k} your question`\nOr: `/{k} your question`\n\n"
-            f"Reply to my answer to continue the conversation.",
+            f"Plain text alone will be ignored.",
             parse_mode=ParseMode.MARKDOWN, reply_markup=back_home_kb())
         return
 
@@ -1166,7 +1174,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "dl:ask":
         _AWAIT_INPUT[uid] = ("download", None)
-        await q.edit_message_text("Send the video URL now.", reply_markup=back_home_kb()); return
+        await q.edit_message_text("Send a Facebook, Instagram, or TikTok URL now.", reply_markup=back_home_kb()); return
 
     if data.startswith("dlx:"):
         try:
@@ -1327,31 +1335,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.log("ERROR", uid, "speak", str(e)[:500])
         return
 
-    # 3) Auto-detect video URLs and offer download
-    url = downloader.detect_url(text)
-    if url and not text.startswith(("/", ".")):
-        # Offer video/audio choice via inline buttons.
-        token = uuid4().hex[:10]
-        context.application.bot_data.setdefault("dl_urls", {})[token] = url
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🎬 Video", callback_data=f"dlx:v:{token}"),
-            InlineKeyboardButton("🎵 Audio", callback_data=f"dlx:a:{token}"),
-        ]])
-        await msg.reply_text(
-            f"Link detected automatically. Choose download type.\n<code>{escape_html(url[:200])}</code>",
-            parse_mode=ParseMode.HTML, reply_markup=kb,
-        )
-        return
-
-    # 4) Reply-to-bot continuation
-    if msg.reply_to_message and msg.reply_to_message.from_user \
-            and msg.reply_to_message.from_user.id == context.bot.id \
-            and not text.startswith(("/", ".")):
-        sess = await db.get_session(msg.chat_id, msg.reply_to_message.message_id)
-        if sess:
-            await _call_provider(update, context, sess[0], text); return
-
-    # 5) Dot-prefix commands
+    # 3) Dot-prefix commands
     if text.startswith("."):
         first, _, rest = text[1:].partition(" ")
         cmd = first.lower()
@@ -1375,6 +1359,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.args = rest.split() if rest else []
                 await oalias[cmd](update, context); return
 
+    # 4) Plain text without command must do nothing
+    return
+
 
 # ============================================================
 # Error handler
@@ -1394,8 +1381,8 @@ USER_COMMANDS = [
     BotCommand("menu",  "Open buttons menu"),
     BotCommand("key",   "Inspect an API key"),
     BotCommand("tryke", "Try a model with last key"),
-    BotCommand("dl",    "Download YT/FB/IG/TikTok video"),
-    BotCommand("dla",   "Download audio-only (mp3)"),
+    BotCommand("dl",    "Download FB/IG/TikTok video"),
+    BotCommand("dla",   "Download FB/IG/TikTok audio"),
     BotCommand("en",    "Encode text (Base64/Hex/Binary/…)"),
     BotCommand("de",    "Decode text from any format"),
     BotCommand("text",  "Transform text case/reverse"),
