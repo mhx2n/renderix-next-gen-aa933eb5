@@ -669,8 +669,13 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = await db.stats()
     ch = await db.get_setting("force_join", FORCE_JOIN_CHANNEL or "(none)")
     live = await db.get_setting("live_response", "on")
+    pm = process_metrics(_PROCESS_STARTED_AT)
     await send_md(update.effective_message,
         f"*Bot Status*\n"
+        f"• Uptime: `{format_duration(pm['uptime_s'])}`\n"
+        f"• Memory (RSS): `{human_size(pm['rss_bytes'])}`\n"
+        f"• CPU load (1/5/15m): `{pm['load_1']:.2f} / {pm['load_5']:.2f} / {pm['load_15']:.2f}`\n"
+        f"• CPU cores: `{pm['cpu_count']}`\n"
         f"• Users: `{s['users']}`\n"
         f"• Banned: `{s['banned']}`\n"
         f"• Messages: `{s['messages']}`\n"
@@ -1153,8 +1158,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             s = await db.stats()
             ch = await db.get_setting("force_join", FORCE_JOIN_CHANNEL or "(none)")
             live = await db.get_setting("live_response", "on")
+            pm = process_metrics(_PROCESS_STARTED_AT)
             await q.edit_message_text(
-                f"*Stats*\nUsers: `{s['users']}` | Banned: `{s['banned']}`\n"
+                f"*Stats*\n"
+                f"Uptime: `{format_duration(pm['uptime_s'])}`\n"
+                f"RAM: `{human_size(pm['rss_bytes'])}` | "
+                f"Load: `{pm['load_1']:.2f}/{pm['load_5']:.2f}/{pm['load_15']:.2f}` "
+                f"({pm['cpu_count']} cores)\n"
+                f"Users: `{s['users']}` | Banned: `{s['banned']}`\n"
                 f"Messages: `{s['messages']}` | Errors: `{s['errors']}`\n"
                 f"Channel: `{ch}` | Live: `{live}`",
                 parse_mode=ParseMode.MARKDOWN, reply_markup=owner_kb())
