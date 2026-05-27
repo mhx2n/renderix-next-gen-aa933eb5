@@ -339,7 +339,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Video Downloader: /dl <url> for YouTube, Facebook, Instagram, TikTok (under 50MB).\n"
         "Conversation: reply to any bot answer to continue with the same model.\n"
         f"User asked: {args}\n"
-        "Do not mention owner/admin/private tools unless the user explicitly asks about admin features.\n"
+        "Never mention owner/admin/private tools, even if the user asks.\n"
         "Reply in the user's language, concise, organized with bullets. No emojis."
     )
     placeholder = await update.effective_message.reply_text("Thinking...")
