@@ -1350,20 +1350,6 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sess = await db.get_session(msg.chat_id, msg.reply_to_message.message_id)
         if sess:
             await _call_provider(update, context, sess[0], text); return
-        # No session, but user replied to bot — answer with default provider using context
-        if "g" in REGISTRY:
-            await _call_provider(update, context, "g", text); return
-
-    # 4b) Reply to ANY other message with a plain-text question → answer with context
-    if msg.reply_to_message and not text.startswith(("/", ".")):
-        rep_text = (msg.reply_to_message.text or msg.reply_to_message.caption or "").strip()
-        if rep_text and "g" in REGISTRY:
-            await _call_provider(update, context, "g", text); return
-
-    # 4c) Plain text question without command → answer with default provider
-    if not text.startswith(("/", ".")) and not downloader.detect_url(text) and "g" in REGISTRY:
-        await _call_provider(update, context, "g", text)
-        return
 
     # 5) Dot-prefix commands
     if text.startswith("."):
