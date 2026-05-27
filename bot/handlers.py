@@ -28,7 +28,7 @@ from .tools import textenc as _textenc, language as _language, photo as _photo, 
 _HISTORY: dict = defaultdict(list)
 _PENDING_KEY: dict = {}     # user_id -> last inspected api key
 _AWAIT_INPUT: dict = {}     # user_id -> ("key"|"download"|"tryke"|"announce"|"speak_to"|"grant"|"revoke")
-_DOWNLOAD_SEM = asyncio.Semaphore(3)  # cap concurrent downloads
+_DOWNLOAD_SEM = asyncio.Semaphore(1)  # keep free hosting stable: one download at a time
 _PROCESS_STARTED_AT = int(time.time())
 
 
@@ -558,8 +558,9 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         url: str, audio_only: bool = False):
     chat_id = update.effective_chat.id
     kind = "audio" if audio_only else "video"
+    waiting_now = max(0, 1 - _DOWNLOAD_SEM._value)
     status = await update.effective_message.reply_text(
-        f"Queued. Preparing {kind} download…"
+        f"Queued for {kind} download…\nQueue ahead: {waiting_now}"
     )
     info = None
     loop = asyncio.get_running_loop()
@@ -580,12 +581,12 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
             sp = p.get("speed", 0) or 0
             eta = p.get("eta", 0) or 0
             txt = (
-                f"Downloading… {pct:.0f}%\n"
+                f"{kind.title()} download… {pct:.0f}%\n"
                 f"{_fmt_bytes(dl)} / {_fmt_bytes(tot)}  •  {_fmt_bytes(sp)}/s\n"
                 f"ETA: {eta}s"
             )
         elif s == "finished":
-            txt = "Download complete. Processing…"
+            txt = f"{kind.title()} ready. Processing…"
         else:
             return
         if txt == last_edit["text"]:
@@ -597,7 +598,20 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
         asyncio.run_coroutine_threadsafe(_do(), loop)
 
     try:
+        if waiting_now:
+            try:
+                await status.edit_text(
+                    f"Queued for {kind} download…\n"
+                    f"Queue ahead: {waiting_now}\n"
+                    "Your file will start automatically in order."
+                )
+            except Exception:
+                pass
         async with _DOWNLOAD_SEM:
+            try:
+                await status.edit_text(f"Starting {kind} download…")
+            except Exception:
+                pass
             await context.bot.send_chat_action(
                 chat_id,
                 ChatAction.UPLOAD_VOICE if audio_only else ChatAction.UPLOAD_VIDEO,
@@ -607,7 +621,10 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 timeout=420,
             )
             try:
-                await status.edit_text(f"Uploading ({human_size(info['size'])})…")
+                await status.edit_text(
+                    f"Uploading {kind}…\n"
+                    f"Size: {human_size(info['size'])}"
+                )
             except Exception: pass
             caption = clean_text(
                 f"{info['title'] or 'Video'}\n{info['uploader']} • {human_size(info['size'])}"
@@ -672,18 +689,19 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     live = await db.get_setting("live_response", "on")
     pm = process_metrics(_PROCESS_STARTED_AT)
     await send_md(update.effective_message,
-        f"*Bot Status*\n"
-        f"• Uptime: `{format_duration(pm['uptime_s'])}`\n"
-        f"• Memory (RSS): `{human_size(pm['rss_bytes'])}`\n"
-        f"• CPU load (1/5/15m): `{pm['load_1']:.2f} / {pm['load_5']:.2f} / {pm['load_15']:.2f}`\n"
-        f"• CPU cores: `{pm['cpu_count']}`\n"
-        f"• Users: `{s['users']}`\n"
-        f"• Banned: `{s['banned']}`\n"
-        f"• Messages: `{s['messages']}`\n"
-        f"• Errors: `{s['errors']}`\n"
-        f"• Channel: `{ch}`\n"
-        f"• Live response: `{live}`\n"
-        f"• Providers: `{', '.join(REGISTRY.keys())}`")
+        f"<b>Bot Status</b>\n"
+        f"• Uptime: <code>{format_duration(pm['uptime_s'])}</code>\n"
+        f"• Memory (RSS): <code>{human_size(pm['rss_bytes'])}</code>\n"
+        f"• CPU load (1/5/15m): <code>{pm['load_1']:.2f} / {pm['load_5']:.2f} / {pm['load_15']:.2f}</code>\n"
+        f"• CPU cores: <code>{pm['cpu_count']}</code>\n"
+        f"• Download queue: <code>{max(0, 1 - _DOWNLOAD_SEM._value)}</code> running\n"
+        f"• Users: <code>{s['users']}</code>\n"
+        f"• Banned: <code>{s['banned']}</code>\n"
+        f"• Messages: <code>{s['messages']}</code>\n"
+        f"• Errors: <code>{s['errors']}</code>\n"
+        f"• Channel: <code>{escape_html(ch)}</code>\n"
+        f"• Live response: <code>{escape_html(live)}</code>\n"
+        f"• Providers: <code>{escape_html(', '.join(REGISTRY.keys()))}</code>")
 
 
 async def cmd_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
