@@ -477,6 +477,7 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
                         f"Too large at tier {tier_idx+1} ({size/1024/1024:.1f} MB)."
                     )
                     continue
+                meta = _probe_media(path) if not audio_only else {}
                 return {
                     "path": path,
                     "size": size,
@@ -484,6 +485,8 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
                     "uploader": info.get("uploader") or info.get("channel") or "",
                     "duration": info.get("duration") or 0,
                     "ext": os.path.splitext(path)[1].lstrip("."),
+                    "width": meta.get("width") or info.get("width") or 0,
+                    "height": meta.get("height") or info.get("height") or 0,
                     "thumbnail": info.get("thumbnail"),
                     "webpage_url": info.get("webpage_url") or url,
                     "audio_only": audio_only,
