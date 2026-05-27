@@ -29,8 +29,12 @@ MAX_BYTES = 49 * 1024 * 1024
 _VIDEO_PROBE_TIMEOUT = 20
 
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-# We rely on yt-dlp's 1000+ supported sites. Any http(s) URL is accepted;
-# yt-dlp will reject truly unsupported ones with a clear error.
+_SUPPORTED_HOSTS = (
+    "facebook.com",
+    "fb.watch",
+    "instagram.com",
+    "tiktok.com",
+)
 
 _UA_IOS = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
@@ -55,6 +59,10 @@ def detect_url(text: str) -> Optional[str]:
     host = (urlparse(url).netloc or "").lower()
     if not host:
         return None
+    if host.startswith("www."):
+        host = host[4:]
+    if not any(host == allowed or host.endswith(f".{allowed}") for allowed in _SUPPORTED_HOSTS):
+        return None
     return url
 
 
@@ -73,16 +81,12 @@ def platform_from_url(url: str) -> str:
     host = (urlparse(url or "").netloc or "").lower()
     if host.startswith("www."):
         host = host[4:]
-    if host.endswith("youtube.com") or host == "youtu.be":
-        return "youtube"
     if host.endswith("tiktok.com"):
         return "tiktok"
     if host.endswith("instagram.com"):
         return "instagram"
     if host.endswith("facebook.com") or host == "fb.watch":
         return "facebook"
-    if host.endswith("twitter.com") or host == "x.com":
-        return "twitter"
     return "generic"
 
 
