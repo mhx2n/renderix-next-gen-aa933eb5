@@ -460,6 +460,8 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
     url = _extract_share_target(url)
     outtmpl = os.path.join(workdir, "%(id).40s.%(ext)s")
     platform = platform_from_url(url)
+    if platform == "generic":
+        raise RuntimeError("[generic] Only Facebook, Instagram, and TikTok links are allowed.")
 
     # TikTok: try tikwm.com first — it bypasses most yt-dlp issues.
     if platform == "tiktok":
@@ -545,15 +547,15 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
             if "max-filesize" in msg or "file is larger" in msg \
                or "requested format is not available" in msg:
                 continue
-            if platform == "facebook" and (
+            if platform in {"facebook", "instagram"} and (
                 "cannot parse data" in msg
                 or "no video formats found" in msg
                 or "requested format is not available" in msg
             ):
                 raise RuntimeError(
-                    "[facebook] Facebook blocked or hid the reel/video stream for this server. "
-                    "Open the share link once in a browser and resend the final public reel/watch URL. "
-                    "If it still fails, the owner must provide fresh Facebook cookies to yt-dlp."
+                    f"[{platform}] {platform.title()} blocked or hid the reel/video stream for this server. "
+                    "Open the link once in a browser and resend the final public reel URL. "
+                    f"If it still fails, the owner must provide fresh {platform.title()} cookies to yt-dlp."
                 )
             # bot-check / auth → no point hammering further tiers
             if "sign in to confirm" in msg or "login required" in msg \
@@ -672,14 +674,14 @@ def user_error_text(err: Exception) -> str:
             )
     if "login required" in low or "private" in low:
         return "This post is private or requires login."
-    if platform == "facebook" and (
+    if platform in {"facebook", "instagram"} and (
         "cannot parse data" in low
         or "no video formats found" in low
-        or "facebook blocked or hid" in low
+        or "blocked or hid" in low
     ):
         return (
-            "Facebook share/reel link টি server থেকে playable stream দিচ্ছে না।\n"
-            "Final public reel/watch URL পাঠান। যদি তবুও fail করে, owner-কে fresh Facebook cookies যোগ করতে হবে।"
+            f"{platform.title()} reel/video link টি server থেকে playable stream দিচ্ছে না।\n"
+            f"Final public reel URL পাঠান। যদি তবুও fail করে, owner-কে fresh {platform.title()} cookies যোগ করতে হবে।"
         )
     if "age" in low and "restricted" in low:
         return "Age-restricted content cannot be downloaded without login."
@@ -694,8 +696,8 @@ def user_error_text(err: Exception) -> str:
         return "This link did not expose a downloadable video stream."
     if "timed out" in low or "timeout" in low:
         return "The remote site took too long to respond. Please try again."
-    if "unsupported url" in low:
-        return "This site is not supported."
+    if "only facebook, instagram, and tiktok links are allowed" in low or "unsupported url" in low:
+        return "Only Facebook, Instagram, and TikTok links are supported in this bot."
     return "Download failed. Please try another link or try again later."
 
 
