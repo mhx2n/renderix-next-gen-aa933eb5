@@ -160,6 +160,12 @@ _FORMAT_LADDER = [
     "bv*+ba/b",
 ]
 
+# Audio-only ladder
+_AUDIO_LADDER = [
+    f"ba[ext=m4a][filesize<{MAX_BYTES}]/ba[filesize<{MAX_BYTES}]",
+    "bestaudio[ext=m4a]/bestaudio/best",
+]
+
 
 def _make_progress_hook(cb: Optional[Callable[[dict], None]]):
     if not cb:
