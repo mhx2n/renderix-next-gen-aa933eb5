@@ -10,6 +10,7 @@ import asyncio
 import logging
 import sys
 
+from telegram.error import Conflict
 from telegram.ext import ApplicationBuilder
 
 from bot.config import BOT_TOKEN, PORT
@@ -33,6 +34,18 @@ log = logging.getLogger("main")
 
 async def _amain():
     await init_db()
+    stop = asyncio.Event()
+
+    def _polling_error_callback(exc):
+        if isinstance(exc, Conflict):
+            log.critical(
+                "Telegram polling conflict detected: another bot instance is already using getUpdates. "
+                "Stopping this instance to avoid endless crash loops."
+            )
+            stop.set()
+            return
+        log.error("Polling error: %s", exc)
+
     app = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
@@ -56,17 +69,23 @@ async def _amain():
     await setup_bot_commands(app)
     await notify_restart_complete(app)
 
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=False)
+    except Exception as exc:
+        log.warning("Could not clear webhook before polling: %s", exc)
+    await asyncio.sleep(2)
+
     # Drop pending updates from previous run to avoid double-processing.
     await app.updater.start_polling(
         drop_pending_updates=True,
         allowed_updates=[
             "message", "callback_query", "edited_message", "inline_query",
         ],
+        error_callback=_polling_error_callback,
     )
     log.info("Polling started. Press Ctrl+C to stop.")
 
     # Run until cancelled
-    stop = asyncio.Event()
     try:
         await stop.wait()
     finally:

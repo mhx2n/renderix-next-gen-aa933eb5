@@ -337,12 +337,15 @@ _FORMAT_LADDER = [
     "bv*[height<=480]+ba/b[height<=480]/best[height<=480]",
     # Tier 5: anything that works
     "bv*+ba/b",
+    # Tier 6: generic best without forcing separate streams
+    "best",
 ]
 
 # Audio-only ladder
 _AUDIO_LADDER = [
     f"ba[ext=m4a][filesize<{MAX_BYTES}]/ba[filesize<{MAX_BYTES}]",
     "bestaudio[ext=m4a]/bestaudio/best",
+    "best",
 ]
 
 
@@ -567,6 +570,55 @@ def _sync_download(url: str, workdir: str, progress: Optional[Callable] = None,
         tik = _tikwm_download(url, workdir, audio_only)
         if tik:
             return tik
+
+    # Final universal fallback: let yt-dlp choose whatever single best stream exists,
+    # then normalize it for Telegram with ffmpeg.
+    try:
+        opts = _ydl_base(url)
+        opts["outtmpl"] = outtmpl
+        opts["format"] = "best"
+        opts.pop("max_filesize", None)
+        if hook:
+            opts["progress_hooks"] = [hook]
+        if audio_only:
+            opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }]
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if "entries" in info:
+                info = info["entries"][0]
+            path = ydl.prepare_filename(info)
+            if not os.path.exists(path):
+                base, _ = os.path.splitext(path)
+                for ext in (".mp3", ".m4a", ".mp4", ".mkv", ".webm", ".mov", ".opus", ".ogg"):
+                    if os.path.exists(base + ext):
+                        path = base + ext
+                        break
+            if not os.path.exists(path):
+                raise RuntimeError("Downloaded file vanished.")
+            path = _ensure_telegram_media(path, audio_only=audio_only)
+            size = os.path.getsize(path)
+            if size > MAX_BYTES:
+                raise RuntimeError("Converted file is still too large for Telegram.")
+            meta = _probe_media(path) if not audio_only else {}
+            return {
+                "path": path,
+                "size": size,
+                "title": (info.get("title") or "")[:200],
+                "uploader": info.get("uploader") or info.get("channel") or "",
+                "duration": info.get("duration") or 0,
+                "ext": os.path.splitext(path)[1].lstrip("."),
+                "width": meta.get("width") or info.get("width") or 0,
+                "height": meta.get("height") or info.get("height") or 0,
+                "thumbnail": info.get("thumbnail"),
+                "webpage_url": info.get("webpage_url") or url,
+                "audio_only": audio_only,
+            }
+    except Exception as e:
+        last_err = e
 
     if last_err:
         raise RuntimeError(f"[{platform}] {last_err}")
