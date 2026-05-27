@@ -300,11 +300,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = escape_html(update.effective_user.first_name or "there")
     txt = (
         f"*Welcome, {name}.*\n\n"
-        "Advanced multi-AI assistant.\n"
-        "• Chat with multiple AI providers\n"
-        "• Inspect any AI API key (status, models, limits)\n"
-        "• Download videos from YouTube, Facebook, Instagram, TikTok\n\n"
-        "Tap a button below to begin."
+        "Command-based bot.\n"
+        "• AI only works with commands like /g, /pr, /co\n"
+        "• Downloader only supports Facebook, Instagram, TikTok\n"
+        "• Plain text messages do nothing\n\n"
+        "Tap a button below to see commands."
     )
     await update.effective_message.reply_text(
         txt, parse_mode=ParseMode.MARKDOWN,
@@ -323,10 +323,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/start  — main menu (buttons)",
             "/menu   — AI provider menu",
             "/key    — inspect API key",
-            "/dl <url>  — download video (YT/FB/IG/TikTok)",
+            "/dl <url>  — download video (FB/IG/TikTok)",
+            "/dla <url> — download audio mp3 (FB/IG/TikTok)",
             "/ping   — latency",
             "/help <topic>  — AI-summarized help on any topic\n",
-            "Tip: reply to any bot answer to continue that chat.",
+            "Plain text does nothing. Only commands work.",
         ]
         await send_md(update.effective_message, "\n".join(lines))
         return
@@ -336,8 +337,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Providers: Gemini (.g), Perplexity (.pr), Copilot (.co) — free, no key needed.\n"
         "API Key Inspector: /key <KEY> works for OpenAI, Anthropic, Gemini, Groq, "
         "OpenRouter, Cohere, DeepSeek, xAI, Together AI. Then /tryke <model> <prompt>.\n"
-        "Video Downloader: /dl <url> for YouTube, Facebook, Instagram, TikTok (under 50MB).\n"
+        "Video Downloader: /dl <url> and /dla <url> for Facebook, Instagram, TikTok only (under 50MB).\n"
         "Conversation: reply to any bot answer to continue with the same model.\n"
+        "Plain text without / or . command must do nothing.\n"
         f"User asked: {args}\n"
         "Never mention owner/admin/private tools, even if the user asks.\n"
         "Reply in the user's language, concise, organized with bullets. No emojis."
