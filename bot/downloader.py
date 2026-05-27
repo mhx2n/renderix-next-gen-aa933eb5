@@ -193,7 +193,7 @@ def _ydl_base(url: str) -> dict:
         "socket_timeout": 30,
         "nocheckcertificate": True,
         "geo_bypass": True,
-        "concurrent_fragment_downloads": 4,
+        "concurrent_fragment_downloads": 1,
         "merge_output_format": "mp4",
         "http_headers": {
             "User-Agent": _UA_DESKTOP,
