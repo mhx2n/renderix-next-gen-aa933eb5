@@ -16,6 +16,23 @@ async def _fetch_json(session, method, url, **kw):
         return 0, {"error": str(e)}, {}
 
 
+async def _verify_auth(session, base: str, key: str, model: str) -> tuple[bool, dict]:
+    """Send a tiny authenticated chat completion to confirm the key is real.
+    Returns (auth_ok, raw_response). 401/403 => invalid; any other status => auth recognized.
+    Used for providers whose /v1/models endpoint is public (NVIDIA, Together, Fireworks, Mistral)."""
+    s, data, _ = await _fetch_json(
+        session, "POST", f"{base}/chat/completions",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={"model": model, "messages": [{"role": "user", "content": "."}], "max_tokens": 1},
+    )
+    if s in (401, 403):
+        return False, {"status": s, "body": data}
+    if s == 0:
+        return False, {"status": 0, "body": data}
+    # 200 / 400 / 404 (model missing) / 429 (rate) all imply auth was accepted
+    return True, {"status": s, "body": data}
+
+
 def _detect(key: str) -> str:
     k = key.strip()
     if k.startswith("sk-or-"): return "openrouter"
