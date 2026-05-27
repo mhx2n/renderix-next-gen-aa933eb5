@@ -200,14 +200,17 @@ def _ask_sync(prompt: str) -> str:
         'Pragma': 'no-cache',
     }
 
-    if csrf_token and '%7C' not in csrf_token[:33]:
-        headers['x-csrf-token'] = csrf_token
-    else:
+    # Match reference behavior: only attach x-csrf-token when the token is
+    # NOT our locally-generated fallback shape (`<hex>%7C<hex>`).
+    if csrf_token and '%7C' not in csrf_token:
         headers['x-csrf-token'] = csrf_token
 
     time.sleep(0.5)
 
-    response = session.post(api_url, json=payload, headers=headers, cookies=all_cookies, timeout=120)
+    response = session.post(
+        api_url, json=payload, headers=headers,
+        cookies=all_cookies, timeout=120,
+    )
 
     if response.status_code != 200:
         body = (response.text or "")[:240]
@@ -219,8 +222,28 @@ def _ask_sync(prompt: str) -> str:
     return answer
 
 
+def _ask_with_retry(prompt: str, attempts: int = 3) -> str:
+    last_err: Exception | None = None
+    for i in range(attempts):
+        try:
+            return _ask_sync(prompt)
+        except RuntimeError as e:
+            last_err = e
+            msg = str(e)
+            # Retry on Cloudflare/anti-bot 403 + transient 5xx with a fresh session.
+            if "HTTP 403" in msg or "HTTP 5" in msg or "Empty response" in msg:
+                time.sleep(1.2 * (i + 1))
+                continue
+            raise
+        except Exception as e:
+            last_err = e
+            time.sleep(1.0 * (i + 1))
+    assert last_err is not None
+    raise last_err
+
+
 async def ask(prompt: str, history: list) -> str:
     if history:
         ctx = "\n".join(f"User: {h['q']}\nAssistant: {h['a']}" for h in history[-3:])
         prompt = f"Previous context:\n{ctx}\n\nNew question: {prompt}"
-    return await asyncio.to_thread(_ask_sync, prompt)
+    return await asyncio.to_thread(_ask_with_retry, prompt)
