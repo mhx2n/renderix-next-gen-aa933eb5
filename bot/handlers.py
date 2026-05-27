@@ -1468,6 +1468,83 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=await toggle_kb(page),
             )
             return
+        if sub == "cust":
+            await q.edit_message_text(
+                "<b>🎨 Customize Menu</b>\n\n"
+                "Personalize the main panel: welcome text, button labels, emojis, "
+                "category names, and layout. Changes apply instantly to all users.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=await cust_kb(),
+            )
+            return
+
+    # Customize Menu sub-actions
+    if data.startswith("cust:"):
+        if not is_owner(uid): return
+        sub = data[5:]
+        if sub == "welcome":
+            _AWAIT_INPUT[uid] = ("cust_welcome", None)
+            cur = await get_ui_welcome()
+            await q.edit_message_text(
+                "<b>Edit Welcome Text</b>\n\n"
+                "Send the new welcome message as your next message.\n"
+                "Use <code>{name}</code> for the user's first name. HTML tags allowed "
+                "(<code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;code&gt;</code>).\n"
+                "Send <code>reset</code> to restore the default.\n\n"
+                f"<b>Current:</b>\n<pre>{escape_html(cur)}</pre>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "row":
+            cur = await get_ui_row_width()
+            new = 1 if cur >= 3 else cur + 1
+            await db.set_setting("ui_row_width", str(new))
+            await q.edit_message_text(
+                f"<b>Buttons per row set to {new}.</b>",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "label":
+            _AWAIT_INPUT[uid] = ("cust_label", None)
+            await q.edit_message_text(
+                "<b>Rename Button</b>\n\n"
+                "Send: <code>&lt;cmd&gt; &lt;new label&gt;</code>\n"
+                "Example: <code>g Ask Gemini</code>\n"
+                "Send <code>&lt;cmd&gt; reset</code> to restore the original label.",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "emoji":
+            _AWAIT_INPUT[uid] = ("cust_emoji", None)
+            await q.edit_message_text(
+                "<b>Set Button Emoji</b>\n\n"
+                "Send: <code>&lt;cmd&gt; &lt;emoji&gt;</code>\n"
+                "Example: <code>g 🤖</code>\n"
+                "Send <code>&lt;cmd&gt; off</code> to remove the emoji.",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "cat":
+            _AWAIT_INPUT[uid] = ("cust_cat", None)
+            cats = " | ".join(TOOL_CATALOG.keys())
+            await q.edit_message_text(
+                "<b>Rename Category</b>\n\n"
+                "Send: <code>&lt;category name&gt; | &lt;new label&gt;</code>\n"
+                "Example: <code>AI Tools | 🤖 AI</code>\n"
+                "Use <code>reset</code> as the new label to restore the original.\n\n"
+                f"<b>Categories:</b> {escape_html(cats)}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "reset":
+            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels", "ui_row_width"):
+                await db.set_setting(k, "")
+            await q.edit_message_text(
+                "<b>All UI customizations reset.</b>",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
 
     # Toggle a single command on/off
     if data.startswith("tg:"):
