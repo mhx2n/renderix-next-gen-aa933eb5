@@ -47,7 +47,7 @@ async def chat(messages: list[dict], model: str | None = None, max_tokens: int =
                temperature: float = 0.2, timeout: int = 60) -> str:
     key = await get_key()
     if not key:
-        raise RuntimeError("Mistral API key not configured. Owner must set it via /mkey.")
+        raise RuntimeError("AI engine key not configured. Owner must set it via /mkey.")
     payload = {
         "model": model or TEXT_MODEL,
         "messages": messages,
@@ -65,7 +65,7 @@ async def chat(messages: list[dict], model: str | None = None, max_tokens: int =
             data = await r.json(content_type=None)
             if r.status >= 400:
                 msg = data.get("message") or data.get("error") or str(data)[:300]
-                raise RuntimeError(f"Mistral API error [{r.status}]: {msg}")
+                raise RuntimeError(f"AI engine error [{r.status}]: {msg}")
             return data["choices"][0]["message"]["content"]
 
 

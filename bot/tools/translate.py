@@ -1,4 +1,4 @@
-"""Translation tool — /tr [lang] <text or reply>. Powered by Mistral.
+"""Translation tool — /tr [lang] <text or reply>.
 Owner manages key via /mkey and daily user limit via /mlimit.
 """
 from __future__ import annotations
@@ -90,7 +90,7 @@ async def cmd_tr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not key:
         await msg.reply_text(
             "Translation is currently unavailable.\n"
-            "The bot owner has not configured the Mistral API key yet."
+            "The bot owner has not configured the AI engine yet."
         )
         return
 
@@ -159,7 +159,7 @@ async def cmd_mkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur = await _mistral.get_key()
         masked = (cur[:4] + "…" + cur[-4:]) if len(cur) >= 10 else ("set" if cur else "not set")
         await update.effective_message.reply_text(
-            f"Mistral key: <code>{masked}</code>\n\n"
+            f"AI engine key: <code>{masked}</code>\n\n"
             "Set:    <code>/mkey &lt;API_KEY&gt;</code>\n"
             "Clear:  <code>/mkey clear</code>",
             parse_mode="HTML",
@@ -168,7 +168,7 @@ async def cmd_mkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
     val = args[0].strip()
     if val.lower() in ("clear", "remove", "delete", "off", "none"):
         await _mistral.set_key("")
-        await update.effective_message.reply_text("Mistral key cleared. /tr and /ocr are now disabled.")
+        await update.effective_message.reply_text("AI engine key cleared. /tr and /ocr are now disabled.")
         return
     await _mistral.set_key(val)
     # delete the message that contained the key for safety
@@ -178,7 +178,7 @@ async def cmd_mkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     await context.bot.send_message(
         update.effective_chat.id,
-        "Mistral key saved. /tr and /ocr are live.",
+        "AI engine key saved. /tr and /ocr are live.",
     )
 
 
@@ -190,7 +190,7 @@ async def cmd_mlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         lim = await _mistral.get_daily_limit()
         await update.effective_message.reply_text(
-            f"Mistral daily limit per user: <b>{lim}</b>\n"
+            f"AI daily limit per user: <b>{lim}</b>\n"
             "(applies to /tr and /ocr combined per-tool)\n\n"
             "Change: <code>/mlimit &lt;number&gt;</code>  (0 disables for everyone except owner)",
             parse_mode="HTML",
@@ -204,7 +204,7 @@ async def cmd_mlimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Usage: /mlimit <0–100000>")
         return
     await _mistral.set_daily_limit(n)
-    await update.effective_message.reply_text(f"Mistral daily limit set to {n}/user/tool.")
+    await update.effective_message.reply_text(f"AI daily limit set to {n}/user/tool.")
 
 
 def register(app: Application):

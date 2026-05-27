@@ -144,7 +144,7 @@ TOOL_CATALOG: dict = {
         ("gra",   "Grammar Fix",  "AI-powered grammar correction.\n\n<b>Usage:</b>\n<code>/gra he go home yesterday</code>"),
         ("syn",   "Synonyms",     "Word alternatives.\n\n<b>Usage:</b>\n<code>/syn happy</code>"),
         ("prn",   "Pronounce",    "Phonetic + audio pronunciation.\n\n<b>Usage:</b>\n<code>/prn pronunciation</code>"),
-        ("tr",    "Translate",    "Translate via Mistral AI.\n\n<b>Usage:</b>\n<code>/tr Hello</code> (auto)\n<code>/tr bn Hello</code>\nReply to a message with <code>/tr fr</code>."),
+        ("tr",    "Translate",    "AI-powered translation.\n\n<b>Usage:</b>\n<code>/tr Hello</code> (auto)\n<code>/tr bn Hello</code>\nReply to a message with <code>/tr fr</code>."),
         ("ocr",   "OCR",          "Extract text from an image.\n\n<b>Usage:</b> Reply to a photo with <code>/ocr</code>.\nReply with <code>/ocr en</code> to translate."),
     ],
     "Photo Tools": [
@@ -509,6 +509,10 @@ async def _do_inspect(update: Update, key: str):
             for k, v in limits.items():
                 lines.append(f"  • {escape_html(str(k))}: <code>{escape_html(str(v))}</code>")
         lines.append("\nTry a model: <code>/tryke &lt;model&gt; &lt;prompt&gt;</code>")
+        if is_owner(update.effective_user.id):
+            lines.append(
+                "Add as bot provider: <code>/addmodel &lt;alias&gt; &lt;model&gt;</code>"
+            )
         await safe_edit(placeholder, "\n".join(lines))
     except Exception as e:
         await safe_edit(placeholder, safe_user_error("Key inspection"))
@@ -695,6 +699,14 @@ async def load_custom_providers(app: Application | None = None):
         register_provider(cmd, name, make_openai_compatible_provider(name, base_url, api_key, model))
         if app:
             app.add_handler(CommandHandler(cmd, make_provider_handler(cmd)))
+        # Also expose as a button in the AI Tools section of the main panel.
+        doc = (
+            f"Chat with {name}.\n\n<b>Usage:</b>\n"
+            f"<code>/{cmd} your question</code>  or  <code>.{cmd} your question</code>"
+        )
+        ai_items = TOOL_CATALOG["AI Tools"]
+        ai_items[:] = [t for t in ai_items if t[0] != cmd]
+        ai_items.append((cmd, name, doc))
 
 
 async def cmd_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -998,6 +1010,125 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for key, (name, _) in REGISTRY.items():
         lines.append(f"• <b>{escape_html(name)}</b> — <code>/{key}</code> or <code>.{key}</code>")
     await send_md(update.effective_message, "\n".join(lines))
+
+
+_RESERVED_CMDS = {
+    "start","help","menu","ping","key","tryke","dl","dla","owner","stats","logs",
+    "users","setchannel","ban","unban","announce","cancel","live","speak","grant",
+    "revoke","restart","mkey","mlimit","addmodel","addprovider","delprovider",
+    "providers","en","de","text","wc","spell","gra","syn","prn","bg","enh","res",
+    "short","style","tr","ocr",
+}
+
+_PROVIDER_BASE_URLS = {
+    "openai":     "https://api.openai.com/v1",
+    "groq":       "https://api.groq.com/openai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "deepseek":   "https://api.deepseek.com/v1",
+    "xai":        "https://api.x.ai/v1",
+    "together":   "https://api.together.xyz/v1",
+    "cohere":     "https://api.cohere.com/compatibility/v1",
+}
+
+
+async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner: add any model from the last inspected key as a new provider button.
+
+    Usage: /addmodel <alias> <model_id>
+    Run /key <API_KEY> first to load a key.
+    """
+    if not await _owner_only(update):
+        return
+    uid = update.effective_user.id
+    if len(context.args) < 2:
+        await update.effective_message.reply_text(
+            "Usage: /addmodel <alias> <model_id>\n\n"
+            "First run /key <API_KEY> to load a key. Then turn any of its models "
+            "into a new bot provider button. An AI will write the description for you."
+        )
+        return
+    key = _PENDING_KEY.get(uid)
+    if not key:
+        await update.effective_message.reply_text(
+            "No API key loaded. Run /key <API_KEY> first."
+        )
+        return
+    alias = context.args[0].lower().strip().lstrip("/.")
+    model = " ".join(context.args[1:]).strip()
+    if not alias.isalnum() or len(alias) > 16:
+        await update.effective_message.reply_text(
+            "Alias must be alphanumeric and ≤ 16 chars."
+        )
+        return
+    if alias in REGISTRY or alias in _RESERVED_CMDS:
+        await update.effective_message.reply_text(
+            f"Alias /{alias} is already taken. Pick a different one."
+        )
+        return
+
+    from .keycheck import _detect
+    kind = _detect(key)
+    base_url = _PROVIDER_BASE_URLS.get(kind)
+    if not base_url:
+        await update.effective_message.reply_text(
+            f"This key type ({kind}) is not yet supported for custom providers.\n"
+            "Supported: OpenAI, Groq, OpenRouter, DeepSeek, xAI, Together AI, Cohere."
+        )
+        return
+
+    name = model.split("/")[-1].replace("-", " ").replace("_", " ").title() or model
+    placeholder = await update.effective_message.reply_text(
+        f"Adding /{alias} → {model}…\nAuto-generating description…"
+    )
+
+    desc = f"Chat with {name}."
+    try:
+        _, gfn = REGISTRY.get("g", (None, None))
+        if gfn:
+            ai = await asyncio.wait_for(
+                gfn(
+                    f"Write one short friendly sentence (max 14 words) describing the "
+                    f"AI model '{model}' for end users. Plain text only. No emojis, "
+                    f"no quotes, no markdown.",
+                    [],
+                ),
+                timeout=25,
+            )
+            ai_line = (ai or "").strip().splitlines()[0][:200]
+            if ai_line:
+                desc = ai_line
+    except Exception:
+        pass
+
+    try:
+        func = make_openai_compatible_provider(name, base_url, key, model)
+        register_provider(alias, name, func)
+        await db.add_custom_provider(alias, name, base_url, key, model)
+        try:
+            context.application.add_handler(CommandHandler(alias, make_provider_handler(alias)))
+        except Exception:
+            pass
+
+        doc = (
+            f"{desc}\n\n<b>Usage:</b>\n"
+            f"<code>/{alias} your question</code>  or  <code>.{alias} your question</code>"
+        )
+        ai_items = TOOL_CATALOG["AI Tools"]
+        ai_items[:] = [t for t in ai_items if t[0] != alias]
+        ai_items.append((alias, name, doc))
+
+        await setup_bot_commands(context.application)
+        await safe_edit(
+            placeholder,
+            f"<b>Provider added</b>\n"
+            f"• Command: <code>/{alias}</code> or <code>.{alias}</code>\n"
+            f"• Model: <code>{escape_html(model)}</code>\n"
+            f"• Button: <b>{escape_html(name)}</b> in AI Tools menu\n\n"
+            f"<i>{escape_html(desc)}</i>",
+        )
+    except Exception as e:
+        await safe_edit(placeholder, safe_user_error("Add provider"))
+        await db.log("ERROR", uid, "addmodel", str(e)[:500])
 
 
 async def on_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1406,8 +1537,8 @@ USER_COMMANDS = [
     BotCommand("res",   "Resize image (presets)"),
     BotCommand("short", "Shorten a URL"),
     BotCommand("style", "Stylish text (40+ fonts)"),
-    BotCommand("tr",    "Translate text (Mistral)"),
-    BotCommand("ocr",   "Extract text from image (Mistral)"),
+    BotCommand("tr",    "Translate text"),
+    BotCommand("ocr",   "Extract text from image"),
     BotCommand("ping",  "Latency check"),
     BotCommand("help",  "Help (add a topic for AI summary)"),
 ]
@@ -1426,8 +1557,11 @@ OWNER_EXTRA = [
     BotCommand("grant",      "Grant speak access"),
     BotCommand("revoke",     "Revoke speak access"),
     BotCommand("restart",    "Restart the bot process"),
-    BotCommand("mkey",       "Set Mistral API key"),
-    BotCommand("mlimit",     "Set Mistral daily per-user limit"),
+    BotCommand("mkey",       "Set translation/OCR engine key"),
+    BotCommand("mlimit",     "Set translation/OCR daily per-user limit"),
+    BotCommand("addmodel",   "Add model from last /key as provider"),
+    BotCommand("delprovider","Remove a custom provider"),
+    BotCommand("providers",  "List active providers"),
 ]
 
 
@@ -1560,6 +1694,10 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("grant",      cmd_grant))
     app.add_handler(CommandHandler("revoke",     cmd_revoke))
     app.add_handler(CommandHandler("restart",    cmd_restart))
+    app.add_handler(CommandHandler("addmodel",   cmd_addmodel))
+    app.add_handler(CommandHandler("addprovider", cmd_addprovider))
+    app.add_handler(CommandHandler("delprovider", cmd_delprovider))
+    app.add_handler(CommandHandler("providers",   cmd_providers))
 
     # Tool-packs
     _textenc.register(app)

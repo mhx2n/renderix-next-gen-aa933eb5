@@ -1,5 +1,5 @@
 """OCR tool — /ocr (reply to a photo or image document).
-Powered by Mistral Vision (pixtral). Shares key + daily-limit infra with /tr.
+Shares key + daily-limit infra with /tr.
 """
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ async def cmd_ocr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not key:
         await msg.reply_text(
             "OCR is currently unavailable.\n"
-            "The bot owner has not configured the Mistral API key yet."
+            "The bot owner has not configured the AI engine yet."
         )
         return
 
