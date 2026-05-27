@@ -585,6 +585,11 @@ async def _do_inspect(update: Update, key: str):
                 f"Detail: <code>{escape_html(json.dumps(info.get('error'))[:500])}</code>")
             return
         _PENDING_KEY[update.effective_user.id] = key
+        # cache the resolved provider kind so /addmodel doesn't re-detect
+        try:
+            _PENDING_KIND[update.effective_user.id] = (info.get("kind") or "").lower()
+        except Exception:
+            pass
         models = info.get("models", [])
         limits = info.get("limits", {})
         lines = [
