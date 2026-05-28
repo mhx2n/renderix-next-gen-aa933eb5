@@ -64,11 +64,62 @@ DEFAULT_THANKS = (
 )
 
 
+DEFAULT_FORCE_JOIN_MSG = (
+    "🔒 <b>Access restricted.</b>\n\n"
+    "To use this bot you must first join our channel — "
+    '<a href="{link}">tap here to join @{channel}</a>.\n\n'
+    "After joining, send your command again."
+)
+
+# Tracks the last force-join warning we sent per (chat_id, user_id) so we can
+# delete it before sending a fresh one — keeps the chat clean while the user
+# has not joined yet.
+_FORCE_JOIN_LAST: dict = {}
+
+
 # ============================================================
 # Helpers
 # ============================================================
 def is_owner(uid: int) -> bool:
     return uid == OWNER_ID
+
+
+async def get_ui_force_join() -> str:
+    return (await db.get_setting("ui_force_join", "")) or DEFAULT_FORCE_JOIN_MSG
+
+
+async def _send_force_join_warning(update: Update, context: ContextTypes.DEFAULT_TYPE, channel: str):
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or not user:
+        return
+    key = (chat.id, user.id)
+    prev = _FORCE_JOIN_LAST.get(key)
+    if prev:
+        try:
+            await context.bot.delete_message(chat.id, prev)
+        except Exception:
+            pass
+        _FORCE_JOIN_LAST.pop(key, None)
+    link = f"https://t.me/{channel}"
+    tpl = await get_ui_force_join()
+    try:
+        body = tpl.replace("{link}", link).replace("{channel}", escape_html(channel))
+    except Exception:
+        body = DEFAULT_FORCE_JOIN_MSG.replace("{link}", link).replace("{channel}", escape_html(channel))
+    sent = None
+    try:
+        sent = await context.bot.send_message(
+            chat_id=chat.id, text=body,
+            parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+        )
+    except Exception:
+        try:
+            sent = await context.bot.send_message(chat_id=chat.id, text=clean_text(body))
+        except Exception:
+            return
+    if sent:
+        _FORCE_JOIN_LAST[key] = sent.message_id
 
 
 async def force_join_ok(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -79,21 +130,23 @@ async def force_join_ok(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     user = update.effective_user
     if not user or is_owner(user.id):
         return True
+    chat = update.effective_chat
     try:
         member = await context.bot.get_chat_member(f"@{channel}", user.id)
         if member.status in (ChatMemberStatus.MEMBER, ChatMemberStatus.OWNER,
                              ChatMemberStatus.ADMINISTRATOR):
+            # Clean up any pending warning now that they've joined.
+            if chat:
+                prev = _FORCE_JOIN_LAST.pop((chat.id, user.id), None)
+                if prev:
+                    try:
+                        await context.bot.delete_message(chat.id, prev)
+                    except Exception:
+                        pass
             return True
     except Exception:
         pass
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Join Channel", url=f"https://t.me/{channel}")],
-        [InlineKeyboardButton("I have joined", callback_data="verify_join")],
-    ])
-    await update.effective_message.reply_text(
-        "Access restricted. You must join our channel to use this bot.",
-        reply_markup=kb,
-    )
+    await _send_force_join_warning(update, context, channel)
     return False
 
 
@@ -406,6 +459,7 @@ async def cust_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🙏 Edit Group Thank-You", callback_data="cust:thanks")],
         [InlineKeyboardButton("➕ Add Thank-You Button", callback_data="cust:tbnadd")],
         [InlineKeyboardButton("➖ Remove Thank-You Button", callback_data="cust:tbndel")],
+        [InlineKeyboardButton("🔒 Edit Join-Warning Text", callback_data="cust:joinmsg")],
         [InlineKeyboardButton("♻️ Reset All", callback_data="cust:reset")],
         [InlineKeyboardButton("« Owner Panel", callback_data="m:owner")],
     ])
@@ -1750,7 +1804,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sub == "reset":
             for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels",
                       "ui_row_width", "ui_main_buttons",
-                      "ui_thanks", "ui_thanks_buttons"):
+                      "ui_thanks", "ui_thanks_buttons", "ui_force_join"):
                 await db.set_setting(k, "")
             await q.edit_message_text(
                 "<b>All UI customizations reset.</b>",
@@ -1857,6 +1911,22 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"<b>Removed:</b> {escape_html(removed['label'])}",
                     parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
                 )
+            return
+        # ---- Force-join warning message ----
+        if sub == "joinmsg":
+            _AWAIT_INPUT[uid] = ("cust_joinmsg", None)
+            cur = await get_ui_force_join()
+            await q.edit_message_text(
+                "<b>Edit Join-Warning Text</b>\n\n"
+                "Send the new warning message as your next message. "
+                "HTML formatting and embedded text-links are preserved.\n"
+                "Placeholders: <code>{channel}</code> (channel username), "
+                "<code>{link}</code> (full https://t.me/&lt;channel&gt; URL).\n"
+                "Send <code>reset</code> to restore the default.\n\n"
+                f"<b>Current:</b>\n{escape_html(cur)[:1500]}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                disable_web_page_preview=True,
+            )
             return
 
     # Toggle a single command on/off
@@ -2031,6 +2101,26 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cur.append({"label": label[:48], "url": url[:256]})
             await _set_json_setting("ui_thanks_buttons", cur)
             await msg.reply_text(f"Added thank-you button: {label[:48]} → {url[:256]}")
+            return
+        if kind == "cust_joinmsg":
+            if text.strip().lower() == "reset":
+                await db.set_setting("ui_force_join", "")
+                await msg.reply_text("Join-warning text reset to default.")
+            else:
+                try:
+                    rich = msg.text_html_urled or msg.caption_html_urled
+                except Exception:
+                    rich = None
+                if not rich:
+                    try:
+                        rich = msg.text_html or msg.caption_html
+                    except Exception:
+                        rich = None
+                await db.set_setting("ui_force_join", rich or text)
+                await msg.reply_text(
+                    "Join-warning message updated. "
+                    "Non-members will see this next time they try a command."
+                )
             return
 
     # 2) Owner/granted speak-as-bot forward
@@ -2364,6 +2454,29 @@ def register_handlers(app: Application):
     # Global gate: blocks disabled commands for non-owners (highest priority).
     app.add_handler(
         MessageHandler(filters.COMMAND, _gate_disabled),
+        group=-1,
+    )
+
+    # Global gate: force-join check. Runs before every command handler so that
+    # tool-pack commands (textenc/language/ocr/etc.) cannot bypass it.
+    async def _gate_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        if not msg:
+            return
+        text = (msg.text or msg.caption or "")
+        if not text.startswith("/"):
+            return
+        # Skip the setchannel command so the owner can always reconfigure.
+        import re as _re
+        m = _re.match(r"/([A-Za-z0-9_]+)", text)
+        cmd = (m.group(1).lower() if m else "")
+        if cmd in ("start", "setchannel"):
+            return
+        if not await force_join_ok(update, context):
+            raise ApplicationHandlerStop
+
+    app.add_handler(
+        MessageHandler(filters.COMMAND, _gate_force_join),
         group=-1,
     )
 
