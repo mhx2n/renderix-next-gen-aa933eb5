@@ -1793,6 +1793,19 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await msg.reply_text(f"Category '{old}' renamed to: {new[:48]}")
             await _set_json_setting("ui_cat_labels", cats)
             return
+        if kind == "cust_btnadd":
+            if "|" not in text:
+                await msg.reply_text("Format: <label> | <url>"); return
+            label, url = [p.strip() for p in text.split("|", 1)]
+            if not label or not url.lower().startswith(("http://", "https://", "tg://")):
+                await msg.reply_text("Invalid. URL must start with http(s):// or tg://"); return
+            cur = await get_ui_main_buttons()
+            if len(cur) >= 8:
+                await msg.reply_text("Limit reached (max 8). Remove one first."); return
+            cur.append({"label": label[:48], "url": url[:256]})
+            await _set_json_setting("ui_main_buttons", cur)
+            await msg.reply_text(f"Added: {label[:48]} → {url[:256]}\nTap /start to preview.")
+            return
 
     # 2) Owner/granted speak-as-bot forward
     target = await db.get_speak_target(uid)
