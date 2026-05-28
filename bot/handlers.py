@@ -227,6 +227,18 @@ async def get_ui_welcome() -> str:
     return (await db.get_setting("ui_welcome", "")) or DEFAULT_WELCOME
 
 
+async def get_ui_main_buttons() -> list:
+    """List of custom owner-defined main-menu buttons: [{label, url}]."""
+    data = await _get_json_setting("ui_main_buttons", [])
+    if not isinstance(data, list):
+        return []
+    out = []
+    for b in data:
+        if isinstance(b, dict) and b.get("label") and b.get("url"):
+            out.append({"label": str(b["label"])[:48], "url": str(b["url"])[:256]})
+    return out
+
+
 # ============================================================
 # Main menus (inline keyboards)
 # ============================================================
@@ -243,6 +255,12 @@ async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
         if len(row) == width:
             rows.append(row); row = []
     if row: rows.append(row)
+    # Owner-defined custom URL buttons (one per row)
+    for b in await get_ui_main_buttons():
+        try:
+            rows.append([InlineKeyboardButton(b["label"], url=b["url"])])
+        except Exception:
+            continue
     if is_owner(uid):
         rows.append([InlineKeyboardButton("⚙️ Owner Panel", callback_data="m:owner")])
     return InlineKeyboardMarkup(rows)
@@ -334,6 +352,8 @@ async def cust_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏷️ Rename Button", callback_data="cust:label")],
         [InlineKeyboardButton("😀 Set Button Emoji", callback_data="cust:emoji")],
         [InlineKeyboardButton("📂 Rename Category", callback_data="cust:cat")],
+        [InlineKeyboardButton("➕ Add Main-Menu Button", callback_data="cust:btnadd")],
+        [InlineKeyboardButton("➖ Remove Main-Menu Button", callback_data="cust:btndel")],
         [InlineKeyboardButton("♻️ Reset All", callback_data="cust:reset")],
         [InlineKeyboardButton("« Owner Panel", callback_data="m:owner")],
     ])
@@ -1596,12 +1616,54 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         if sub == "reset":
-            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels", "ui_row_width"):
+            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels", "ui_row_width", "ui_main_buttons"):
                 await db.set_setting(k, "")
             await q.edit_message_text(
                 "<b>All UI customizations reset.</b>",
                 parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
             )
+            return
+        if sub == "btnadd":
+            _AWAIT_INPUT[uid] = ("cust_btnadd", None)
+            cur = await get_ui_main_buttons()
+            lines = "\n".join(f"• {escape_html(b['label'])} — {escape_html(b['url'])}" for b in cur) or "(none)"
+            await q.edit_message_text(
+                "<b>Add Main-Menu Button</b>\n\n"
+                "Send: <code>&lt;label&gt; | &lt;url&gt;</code>\n"
+                "Example: <code>Join Channel | https://t.me/yourchannel</code>\n\n"
+                f"<b>Current ({len(cur)}/8):</b>\n{lines}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "btndel":
+            cur = await get_ui_main_buttons()
+            if not cur:
+                await q.edit_message_text(
+                    "<b>No custom main-menu buttons to remove.</b>",
+                    parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                )
+                return
+            rows = [[InlineKeyboardButton(f"❌ {b['label']}", callback_data=f"cust:btnrm:{i}")]
+                    for i, b in enumerate(cur)]
+            rows.append([InlineKeyboardButton("« Back", callback_data="ow:cust")])
+            await q.edit_message_text(
+                "<b>Tap a button to remove it.</b>",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows),
+            )
+            return
+        if sub.startswith("btnrm:"):
+            try:
+                idx = int(sub.split(":", 1)[1])
+            except Exception:
+                return
+            cur = await get_ui_main_buttons()
+            if 0 <= idx < len(cur):
+                removed = cur.pop(idx)
+                await _set_json_setting("ui_main_buttons", cur)
+                await q.edit_message_text(
+                    f"<b>Removed:</b> {escape_html(removed['label'])}",
+                    parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                )
             return
 
     # Toggle a single command on/off
@@ -1668,7 +1730,18 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await db.set_setting("ui_welcome", "")
                 await msg.reply_text("Welcome text reset to default.")
             else:
-                await db.set_setting("ui_welcome", text)
+                # Preserve Telegram-formatted entities (text_link, bold, etc.)
+                # by converting them to HTML before storing.
+                try:
+                    rich = msg.text_html_urled or msg.caption_html_urled
+                except Exception:
+                    rich = None
+                if not rich:
+                    try:
+                        rich = msg.text_html or msg.caption_html
+                    except Exception:
+                        rich = None
+                await db.set_setting("ui_welcome", rich or text)
                 await msg.reply_text("Welcome text updated. Tap /start to preview.")
             return
         if kind == "cust_label":
@@ -1719,6 +1792,19 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cats[old] = new[:48]
                 await msg.reply_text(f"Category '{old}' renamed to: {new[:48]}")
             await _set_json_setting("ui_cat_labels", cats)
+            return
+        if kind == "cust_btnadd":
+            if "|" not in text:
+                await msg.reply_text("Format: <label> | <url>"); return
+            label, url = [p.strip() for p in text.split("|", 1)]
+            if not label or not url.lower().startswith(("http://", "https://", "tg://")):
+                await msg.reply_text("Invalid. URL must start with http(s):// or tg://"); return
+            cur = await get_ui_main_buttons()
+            if len(cur) >= 8:
+                await msg.reply_text("Limit reached (max 8). Remove one first."); return
+            cur.append({"label": label[:48], "url": url[:256]})
+            await _set_json_setting("ui_main_buttons", cur)
+            await msg.reply_text(f"Added: {label[:48]} → {url[:256]}\nTap /start to preview.")
             return
 
     # 2) Owner/granted speak-as-bot forward
