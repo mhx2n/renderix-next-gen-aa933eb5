@@ -794,7 +794,14 @@ async def cmd_tryke(update: Update, context: ContextTypes.DEFAULT_TYPE):
         out = await asyncio.wait_for(try_model(key, model, prompt), timeout=120)
         await stream_edit(placeholder, f"<b>{escape_html(model)}</b>\n\n{format_ai_answer(out)}")
     except Exception as e:
-        await safe_edit(placeholder, safe_user_error("Model test"))
+        msg = str(e)
+        # Trim long upstream JSON dumps but keep the useful bit
+        if len(msg) > 350:
+            msg = msg[:350] + "..."
+        await safe_edit(
+            placeholder,
+            f"⚠️ <b>Model test failed</b>\n<code>{escape_html(model)}</code>\n\n{escape_html(msg)}",
+        )
         await db.log("ERROR", update.effective_user.id, "tryke", str(e)[:500])
 
 
