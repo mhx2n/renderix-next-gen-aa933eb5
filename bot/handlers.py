@@ -459,6 +459,7 @@ async def cust_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🙏 Edit Group Thank-You", callback_data="cust:thanks")],
         [InlineKeyboardButton("➕ Add Thank-You Button", callback_data="cust:tbnadd")],
         [InlineKeyboardButton("➖ Remove Thank-You Button", callback_data="cust:tbndel")],
+        [InlineKeyboardButton("🔒 Edit Join-Warning Text", callback_data="cust:joinmsg")],
         [InlineKeyboardButton("♻️ Reset All", callback_data="cust:reset")],
         [InlineKeyboardButton("« Owner Panel", callback_data="m:owner")],
     ])
