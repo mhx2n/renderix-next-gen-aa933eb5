@@ -16,6 +16,7 @@ from telegram.error import NetworkError, TimedOut, TelegramError
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, InlineQueryHandler, TypeHandler, filters,
+    ApplicationHandlerStop,
 )
 from telegram import MessageEntity
 
@@ -42,6 +43,24 @@ _UPLOAD_SEM = asyncio.Semaphore(2)    # uploads can run in parallel for better t
 _DOWNLOAD_QUEUE = 0
 _DOWNLOAD_QUEUE_LOCK = asyncio.Lock()
 _PROCESS_STARTED_AT = int(time.time())
+
+# Sensitive commands that must only be usable in private chat.
+# Any attempt in a group/supergroup is rejected with a hint.
+_PRIVATE_ONLY_CMDS = {
+    "key", "tryke", "mkey", "mlimit",
+    "owner", "stats", "logs", "users", "setchannel",
+    "ban", "unban", "grant", "revoke",
+    "announce", "live", "speak", "restart",
+    "addmodel", "addprovider", "delprovider", "providers",
+}
+
+
+DEFAULT_THANKS = (
+    "Hello {adder}! 🙏\n\n"
+    "Thank you for adding me to <b>{chat}</b>. "
+    "I'm now ready to assist this group.\n\n"
+    "Tap /start to explore what I can do, or /help for the full command list."
+)
 
 
 # ============================================================
@@ -241,6 +260,33 @@ async def get_ui_main_buttons() -> list:
     return out
 
 
+async def get_ui_thanks() -> str:
+    return (await db.get_setting("ui_thanks", "")) or DEFAULT_THANKS
+
+
+async def get_ui_thanks_buttons() -> list:
+    data = await _get_json_setting("ui_thanks_buttons", [])
+    if not isinstance(data, list):
+        return []
+    out = []
+    for b in data:
+        if isinstance(b, dict) and b.get("label") and b.get("url"):
+            out.append({"label": str(b["label"])[:48], "url": str(b["url"])[:256]})
+    return out
+
+
+def thanks_kb(buttons: list) -> InlineKeyboardMarkup | None:
+    if not buttons:
+        return None
+    rows = []
+    for b in buttons:
+        try:
+            rows.append([InlineKeyboardButton(b["label"], url=b["url"])])
+        except Exception:
+            continue
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
 # ============================================================
 # Main menus (inline keyboards)
 # ============================================================
@@ -356,6 +402,9 @@ async def cust_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📂 Rename Category", callback_data="cust:cat")],
         [InlineKeyboardButton("➕ Add Main-Menu Button", callback_data="cust:btnadd")],
         [InlineKeyboardButton("➖ Remove Main-Menu Button", callback_data="cust:btndel")],
+        [InlineKeyboardButton("🙏 Edit Group Thank-You", callback_data="cust:thanks")],
+        [InlineKeyboardButton("➕ Add Thank-You Button", callback_data="cust:tbnadd")],
+        [InlineKeyboardButton("➖ Remove Thank-You Button", callback_data="cust:tbndel")],
         [InlineKeyboardButton("♻️ Reset All", callback_data="cust:reset")],
         [InlineKeyboardButton("« Owner Panel", callback_data="m:owner")],
     ])
@@ -497,6 +546,21 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
                          provider_key: str, prompt: str):
     if not await force_join_ok(update, context): return
+    # In groups, AI providers must ONLY respond when the user is replying
+    # to one of the bot's previous AI messages (an existing AI session).
+    # Standalone /g, /co, /pr, etc. in groups stay silent — keeps noise low.
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    if chat_type in ("group", "supergroup"):
+        rep0 = update.effective_message.reply_to_message
+        is_reply_to_ai = False
+        if rep0 and rep0.from_user and rep0.from_user.id == context.bot.id:
+            try:
+                sess0 = await db.get_session(update.effective_chat.id, rep0.message_id)
+                is_reply_to_ai = bool(sess0)
+            except Exception:
+                is_reply_to_ai = False
+        if not is_reply_to_ai:
+            return
     if not prompt.strip():
         await update.effective_message.reply_text("Please provide a question after the command.")
         return
@@ -1655,7 +1719,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         if sub == "reset":
-            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels", "ui_row_width", "ui_main_buttons"):
+            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels",
+                      "ui_row_width", "ui_main_buttons",
+                      "ui_thanks", "ui_thanks_buttons"):
                 await db.set_setting(k, "")
             await q.edit_message_text(
                 "<b>All UI customizations reset.</b>",
@@ -1699,6 +1765,65 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if 0 <= idx < len(cur):
                 removed = cur.pop(idx)
                 await _set_json_setting("ui_main_buttons", cur)
+                await q.edit_message_text(
+                    f"<b>Removed:</b> {escape_html(removed['label'])}",
+                    parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                )
+            return
+        # ---- Group thank-you message (text) ----
+        if sub == "thanks":
+            _AWAIT_INPUT[uid] = ("cust_thanks", None)
+            cur = await get_ui_thanks()
+            await q.edit_message_text(
+                "<b>Edit Group Thank-You</b>\n\n"
+                "Send the new thank-you text as your next message. "
+                "HTML formatting and text-links are preserved.\n"
+                "Placeholders: <code>{adder}</code> (who added the bot), "
+                "<code>{chat}</code> (group title).\n"
+                "Send <code>reset</code> to restore the default.\n\n"
+                f"<b>Current:</b>\n{escape_html(cur)[:1500]}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                disable_web_page_preview=True,
+            )
+            return
+        # ---- Thank-you message buttons ----
+        if sub == "tbnadd":
+            _AWAIT_INPUT[uid] = ("cust_tbnadd", None)
+            cur = await get_ui_thanks_buttons()
+            lines = "\n".join(f"• {escape_html(b['label'])} — {escape_html(b['url'])}" for b in cur) or "(none)"
+            await q.edit_message_text(
+                "<b>Add Thank-You Button</b>\n\n"
+                "Send: <code>&lt;label&gt; | &lt;url&gt;</code>\n"
+                "Example: <code>Owner | https://t.me/yourname</code>\n\n"
+                f"<b>Current ({len(cur)}/8):</b>\n{lines}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "tbndel":
+            cur = await get_ui_thanks_buttons()
+            if not cur:
+                await q.edit_message_text(
+                    "<b>No thank-you buttons to remove.</b>",
+                    parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                )
+                return
+            rows = [[InlineKeyboardButton(f"❌ {b['label']}", callback_data=f"cust:tbnrm:{i}")]
+                    for i, b in enumerate(cur)]
+            rows.append([InlineKeyboardButton("« Back", callback_data="ow:cust")])
+            await q.edit_message_text(
+                "<b>Tap a thank-you button to remove it.</b>",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows),
+            )
+            return
+        if sub.startswith("tbnrm:"):
+            try:
+                idx = int(sub.split(":", 1)[1])
+            except Exception:
+                return
+            cur = await get_ui_thanks_buttons()
+            if 0 <= idx < len(cur):
+                removed = cur.pop(idx)
+                await _set_json_setting("ui_thanks_buttons", cur)
                 await q.edit_message_text(
                     f"<b>Removed:</b> {escape_html(removed['label'])}",
                     parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
@@ -1845,6 +1970,39 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _set_json_setting("ui_main_buttons", cur)
             await msg.reply_text(f"Added: {label[:48]} → {url[:256]}\nTap /start to preview.")
             return
+        if kind == "cust_thanks":
+            if text.strip().lower() == "reset":
+                await db.set_setting("ui_thanks", "")
+                await msg.reply_text("Group thank-you text reset to default.")
+            else:
+                try:
+                    rich = msg.text_html_urled or msg.caption_html_urled
+                except Exception:
+                    rich = None
+                if not rich:
+                    try:
+                        rich = msg.text_html or msg.caption_html
+                    except Exception:
+                        rich = None
+                await db.set_setting("ui_thanks", rich or text)
+                await msg.reply_text(
+                    "Group thank-you message updated. "
+                    "It will be sent the next time the bot is added to a group."
+                )
+            return
+        if kind == "cust_tbnadd":
+            if "|" not in text:
+                await msg.reply_text("Format: <label> | <url>"); return
+            label, url = [p.strip() for p in text.split("|", 1)]
+            if not label or not url.lower().startswith(("http://", "https://", "tg://")):
+                await msg.reply_text("Invalid. URL must start with http(s):// or tg://"); return
+            cur = await get_ui_thanks_buttons()
+            if len(cur) >= 8:
+                await msg.reply_text("Limit reached (max 8). Remove one first."); return
+            cur.append({"label": label[:48], "url": url[:256]})
+            await _set_json_setting("ui_thanks_buttons", cur)
+            await msg.reply_text(f"Added thank-you button: {label[:48]} → {url[:256]}")
+            return
 
     # 2) Owner/granted speak-as-bot forward
     target = await db.get_speak_target(uid)
@@ -1861,6 +2019,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text.startswith("."):
         first, _, rest = text[1:].partition(" ")
         cmd = first.lower()
+        # Sensitive commands cannot run in groups (privacy).
+        chat_type = update.effective_chat.type if update.effective_chat else "private"
+        if cmd in _PRIVATE_ONLY_CMDS and chat_type in ("group", "supergroup"):
+            try:
+                await msg.reply_text(
+                    "🔒 This is a sensitive command. Please use it in my private inbox."
+                )
+            except Exception:
+                pass
+            return
         if cmd in REGISTRY:
             await _call_provider(update, context, cmd, rest); return
         alias = {
@@ -2051,6 +2219,51 @@ async def _gate_disabled(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def register_handlers(app: Application):
+    pass  # placeholder anchor
+
+
+async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """When the bot itself is added to a group, send a professional thank-you
+    to whoever added it. Owner can fully customize the text + inline buttons."""
+    msg = update.effective_message
+    if not msg or not msg.new_chat_members:
+        return
+    bot_id = context.bot.id
+    if not any(m.id == bot_id for m in msg.new_chat_members):
+        return  # someone else was added, not us
+    adder_user = msg.from_user
+    if adder_user:
+        adder = f"<a href=\"tg://user?id={adder_user.id}\">" \
+                f"{escape_html(adder_user.first_name or 'there')}</a>"
+    else:
+        adder = "there"
+    chat_title = escape_html((update.effective_chat.title if update.effective_chat else "") or "this group")
+    template = await get_ui_thanks()
+    try:
+        body = template.replace("{adder}", adder).replace("{chat}", chat_title)
+    except Exception:
+        body = template
+    kb = thanks_kb(await get_ui_thanks_buttons())
+    try:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=body,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=kb,
+        )
+    except Exception:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=clean_text(body),
+                reply_markup=kb,
+            )
+        except Exception as e:
+            await db.log("ERROR", 0, "thanks", str(e)[:300])
+
+
+def register_handlers(app: Application):
     # Allow every command to be invoked with a leading "." in addition to "/".
     # We rewrite the incoming message text/caption BEFORE any handler runs so
     # that PTB's CommandHandler matches naturally.
@@ -2094,10 +2307,35 @@ def register_handlers(app: Application):
 
     app.add_handler(TypeHandler(Update, _dot_prefix_rewriter), group=-3)
 
+    # Block sensitive commands from being run in group chats.
+    async def _gate_private_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        chat = update.effective_chat
+        if not msg or not chat or chat.type not in ("group", "supergroup"):
+            return
+        text = (msg.text or msg.caption or "")
+        if not text.startswith("/"):
+            return
+        import re as _re
+        m = _re.match(r"/([A-Za-z0-9_]+)", text)
+        if not m:
+            return
+        cmd = m.group(1).lower()
+        if cmd in _PRIVATE_ONLY_CMDS:
+            try:
+                await msg.reply_text(
+                    "🔒 This is a sensitive command. Please use it in my private inbox."
+                )
+            except Exception:
+                pass
+            raise ApplicationHandlerStop
+
+    app.add_handler(MessageHandler(filters.COMMAND, _gate_private_only), group=-2)
+
     # Global gate: blocks disabled commands for non-owners (highest priority).
     app.add_handler(
         MessageHandler(filters.COMMAND, _gate_disabled),
-        group=-2,
+        group=-1,
     )
 
     # User
@@ -2153,4 +2391,13 @@ def register_handlers(app: Application):
     )
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+
+    # Thank-you when the bot is added to a group/supergroup.
+    app.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.NEW_CHAT_MEMBERS,
+            on_new_chat_members,
+        )
+    )
+
     app.add_error_handler(on_error)
