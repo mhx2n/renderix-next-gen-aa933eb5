@@ -1933,21 +1933,39 @@ def register_handlers(app: Application):
         msg = update.effective_message
         if not msg:
             return
-        for attr in ("text", "caption"):
-            val = getattr(msg, attr, None)
-            if not val or not val.startswith("."):
-                continue
-            # Must look like ".word..." — first char after dot is a letter/digit/underscore.
-            if len(val) < 2 or not (val[1].isalnum() or val[1] == "_"):
-                continue
-            new_val = "/" + val[1:]
-            try:
-                object.__setattr__(msg, attr, new_val)
-            except Exception:
-                try:
-                    setattr(msg, attr, new_val)
-                except Exception:
-                    pass
+        val = msg.text or msg.caption
+        if not val or not val.startswith("."):
+            return
+        if len(val) < 2 or not (val[1].isalnum() or val[1] == "_"):
+            return
+        # Length of the command token (e.g. ".help" -> 5, ".g@bot" -> length of "/g@bot").
+        import re as _re
+        m = _re.match(r"\.([A-Za-z0-9_]+(?:@[A-Za-z0-9_]+)?)", val)
+        if not m:
+            return
+        cmd_len = 1 + len(m.group(1))  # leading "/" + command
+        new_val = "/" + val[1:]
+        ent = MessageEntity(type=MessageEntity.BOT_COMMAND, offset=0, length=cmd_len)
+        try:
+            msg._unfreeze()
+        except Exception:
+            pass
+        try:
+            if msg.text is not None:
+                msg.text = new_val
+            elif msg.caption is not None:
+                msg.caption = new_val
+            # Replace entities so CommandHandler sees a bot_command at offset 0.
+            if msg.text is not None:
+                msg.entities = (ent,)
+            else:
+                msg.caption_entities = (ent,)
+        except Exception:
+            pass
+        try:
+            msg._freeze()
+        except Exception:
+            pass
 
     app.add_handler(TypeHandler(Update, _dot_prefix_rewriter), group=-3)
 
