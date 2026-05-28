@@ -1970,6 +1970,39 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _set_json_setting("ui_main_buttons", cur)
             await msg.reply_text(f"Added: {label[:48]} → {url[:256]}\nTap /start to preview.")
             return
+        if kind == "cust_thanks":
+            if text.strip().lower() == "reset":
+                await db.set_setting("ui_thanks", "")
+                await msg.reply_text("Group thank-you text reset to default.")
+            else:
+                try:
+                    rich = msg.text_html_urled or msg.caption_html_urled
+                except Exception:
+                    rich = None
+                if not rich:
+                    try:
+                        rich = msg.text_html or msg.caption_html
+                    except Exception:
+                        rich = None
+                await db.set_setting("ui_thanks", rich or text)
+                await msg.reply_text(
+                    "Group thank-you message updated. "
+                    "It will be sent the next time the bot is added to a group."
+                )
+            return
+        if kind == "cust_tbnadd":
+            if "|" not in text:
+                await msg.reply_text("Format: <label> | <url>"); return
+            label, url = [p.strip() for p in text.split("|", 1)]
+            if not label or not url.lower().startswith(("http://", "https://", "tg://")):
+                await msg.reply_text("Invalid. URL must start with http(s):// or tg://"); return
+            cur = await get_ui_thanks_buttons()
+            if len(cur) >= 8:
+                await msg.reply_text("Limit reached (max 8). Remove one first."); return
+            cur.append({"label": label[:48], "url": url[:256]})
+            await _set_json_setting("ui_thanks_buttons", cur)
+            await msg.reply_text(f"Added thank-you button: {label[:48]} → {url[:256]}")
+            return
 
     # 2) Owner/granted speak-as-bot forward
     target = await db.get_speak_target(uid)
