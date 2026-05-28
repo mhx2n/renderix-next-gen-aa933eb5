@@ -485,15 +485,43 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     if not args:
-        lines = ["*Help Center*\n", "Basic commands:"]
-        for c, d in basics:
-            lines.append(f"/{c}  — {d}")
+        try:
+            me = await context.bot.get_me()
+            bname = me.first_name or me.username or "Bot"
+        except Exception:
+            bname = "Bot"
+        # Pick 5 sample topics from live commands for personalised examples.
+        sample_pool = []
         for cat, live in live_by_cat.items():
-            lines.append(f"\n*{cat}:*")
             for c, label, _doc in live:
-                lines.append(f"/{c}  — {label}")
-        lines.append("\nPlain text does nothing. Only /command or .command works.")
-        await send_md(update.effective_message, "\n".join(lines))
+                sample_pool.append((c, label, cat))
+        import random as _rnd
+        _rnd.shuffle(sample_pool)
+        picks = sample_pool[:4]
+        example_lines = [
+            f"• <code>/help {c}</code>  — what does {label} do?"
+            for c, label, _cat in picks
+        ]
+        if not example_lines:
+            example_lines = [
+                "• <code>/help what can you do?</code>",
+                "• <code>/help list all tools</code>",
+            ]
+        # Always add a couple of natural-language style prompts.
+        example_lines.append("• <code>/help how do I download a video?</code>")
+        example_lines.append("• <code>/help which AI models are available?</code>")
+        intro = (
+            f"<b>🤖 {html.escape(bname)} — Help Desk</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Hey! I'm <b>{html.escape(bname)}</b>, your all-in-one Telegram companion.\n"
+            f"Instead of dumping a giant command list, just <b>ask me what you need</b> "
+            f"after <code>/help</code> and I'll explain it in plain words.\n\n"
+            f"<b>Try one of these:</b>\n" + "\n".join(example_lines) +
+            f"\n\n<i>Tip: every command also works with a dot — e.g. <code>.help</code></i>"
+        )
+        await update.effective_message.reply_text(
+            intro, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
         return
 
     # AI-summarized help — feed only the live commands so AI never mentions disabled ones.
