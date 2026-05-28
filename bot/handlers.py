@@ -12,6 +12,7 @@ from telegram import (
     InlineQueryResultArticle, InputTextMessageContent,
 )
 from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
+from telegram.error import NetworkError, TimedOut, TelegramError
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, InlineQueryHandler, TypeHandler, filters,
@@ -37,6 +38,7 @@ _PENDING_KEY: dict = {}     # user_id -> last inspected api key
 _PENDING_KIND: dict = {}    # user_id -> resolved provider kind ("openai", "cohere", ...)
 _AWAIT_INPUT: dict = {}     # user_id -> ("key"|"download"|"tryke"|"announce"|"speak_to"|"grant"|"revoke")
 _DOWNLOAD_SEM = asyncio.Semaphore(1)  # keep free hosting stable: one download at a time
+_UPLOAD_SEM = asyncio.Semaphore(2)    # uploads can run in parallel for better throughput
 _DOWNLOAD_QUEUE = 0
 _DOWNLOAD_QUEUE_LOCK = asyncio.Lock()
 _PROCESS_STARTED_AT = int(time.time())
