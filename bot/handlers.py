@@ -64,11 +64,62 @@ DEFAULT_THANKS = (
 )
 
 
+DEFAULT_FORCE_JOIN_MSG = (
+    "🔒 <b>Access restricted.</b>\n\n"
+    "To use this bot you must first join our channel — "
+    '<a href="{link}">tap here to join @{channel}</a>.\n\n'
+    "After joining, send your command again."
+)
+
+# Tracks the last force-join warning we sent per (chat_id, user_id) so we can
+# delete it before sending a fresh one — keeps the chat clean while the user
+# has not joined yet.
+_FORCE_JOIN_LAST: dict = {}
+
+
 # ============================================================
 # Helpers
 # ============================================================
 def is_owner(uid: int) -> bool:
     return uid == OWNER_ID
+
+
+async def get_ui_force_join() -> str:
+    return (await db.get_setting("ui_force_join", "")) or DEFAULT_FORCE_JOIN_MSG
+
+
+async def _send_force_join_warning(update: Update, context: ContextTypes.DEFAULT_TYPE, channel: str):
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or not user:
+        return
+    key = (chat.id, user.id)
+    prev = _FORCE_JOIN_LAST.get(key)
+    if prev:
+        try:
+            await context.bot.delete_message(chat.id, prev)
+        except Exception:
+            pass
+        _FORCE_JOIN_LAST.pop(key, None)
+    link = f"https://t.me/{channel}"
+    tpl = await get_ui_force_join()
+    try:
+        body = tpl.replace("{link}", link).replace("{channel}", escape_html(channel))
+    except Exception:
+        body = DEFAULT_FORCE_JOIN_MSG.replace("{link}", link).replace("{channel}", escape_html(channel))
+    sent = None
+    try:
+        sent = await context.bot.send_message(
+            chat_id=chat.id, text=body,
+            parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+        )
+    except Exception:
+        try:
+            sent = await context.bot.send_message(chat_id=chat.id, text=clean_text(body))
+        except Exception:
+            return
+    if sent:
+        _FORCE_JOIN_LAST[key] = sent.message_id
 
 
 async def force_join_ok(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -79,21 +130,23 @@ async def force_join_ok(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     user = update.effective_user
     if not user or is_owner(user.id):
         return True
+    chat = update.effective_chat
     try:
         member = await context.bot.get_chat_member(f"@{channel}", user.id)
         if member.status in (ChatMemberStatus.MEMBER, ChatMemberStatus.OWNER,
                              ChatMemberStatus.ADMINISTRATOR):
+            # Clean up any pending warning now that they've joined.
+            if chat:
+                prev = _FORCE_JOIN_LAST.pop((chat.id, user.id), None)
+                if prev:
+                    try:
+                        await context.bot.delete_message(chat.id, prev)
+                    except Exception:
+                        pass
             return True
     except Exception:
         pass
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Join Channel", url=f"https://t.me/{channel}")],
-        [InlineKeyboardButton("I have joined", callback_data="verify_join")],
-    ])
-    await update.effective_message.reply_text(
-        "Access restricted. You must join our channel to use this bot.",
-        reply_markup=kb,
-    )
+    await _send_force_join_warning(update, context, channel)
     return False
 
 
