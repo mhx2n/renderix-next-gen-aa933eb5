@@ -755,13 +755,17 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
         async with _DOWNLOAD_SEM:
             stage = "downloading"
             try:
-                await status.edit_text(f"Starting {kind} download…")
-            except Exception:
-                pass
-            info = await asyncio.wait_for(
-                downloader.download(url, progress=_on_progress, audio_only=audio_only),
-                timeout=240,
-            )
+                try:
+                    await status.edit_text(f"Starting {kind} download…")
+                except Exception:
+                    pass
+                info = await asyncio.wait_for(
+                    downloader.download(url, progress=_on_progress, audio_only=audio_only),
+                    timeout=240,
+                )
+            finally:
+                async with _DOWNLOAD_QUEUE_LOCK:
+                    _DOWNLOAD_QUEUE = max(0, _DOWNLOAD_QUEUE - 1)
         stage = "uploading"
         async with _UPLOAD_SEM:
             try:
@@ -840,8 +844,6 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
         except Exception: pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {type(e).__name__}: {e}")
     finally:
-        async with _DOWNLOAD_QUEUE_LOCK:
-            _DOWNLOAD_QUEUE = max(0, _DOWNLOAD_QUEUE - 1)
         if info: downloader.cleanup(info)
 
 
