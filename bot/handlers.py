@@ -14,8 +14,9 @@ from telegram import (
 from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ContextTypes, InlineQueryHandler, filters,
+    ContextTypes, InlineQueryHandler, TypeHandler, filters,
 )
+from telegram import MessageEntity
 
 from . import db, downloader
 from .config import OWNER_ID, FORCE_JOIN_CHANNEL
@@ -1925,6 +1926,49 @@ async def _gate_disabled(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def register_handlers(app: Application):
+    # Allow every command to be invoked with a leading "." in addition to "/".
+    # We rewrite the incoming message text/caption BEFORE any handler runs so
+    # that PTB's CommandHandler matches naturally.
+    async def _dot_prefix_rewriter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        if not msg:
+            return
+        val = msg.text or msg.caption
+        if not val or not val.startswith("."):
+            return
+        if len(val) < 2 or not (val[1].isalnum() or val[1] == "_"):
+            return
+        # Length of the command token (e.g. ".help" -> 5, ".g@bot" -> length of "/g@bot").
+        import re as _re
+        m = _re.match(r"\.([A-Za-z0-9_]+(?:@[A-Za-z0-9_]+)?)", val)
+        if not m:
+            return
+        cmd_len = 1 + len(m.group(1))  # leading "/" + command
+        new_val = "/" + val[1:]
+        ent = MessageEntity(type=MessageEntity.BOT_COMMAND, offset=0, length=cmd_len)
+        try:
+            msg._unfreeze()
+        except Exception:
+            pass
+        try:
+            if msg.text is not None:
+                msg.text = new_val
+            elif msg.caption is not None:
+                msg.caption = new_val
+            # Replace entities so CommandHandler sees a bot_command at offset 0.
+            if msg.text is not None:
+                msg.entities = (ent,)
+            else:
+                msg.caption_entities = (ent,)
+        except Exception:
+            pass
+        try:
+            msg._freeze()
+        except Exception:
+            pass
+
+    app.add_handler(TypeHandler(Update, _dot_prefix_rewriter), group=-3)
+
     # Global gate: blocks disabled commands for non-owners (highest priority).
     app.add_handler(
         MessageHandler(filters.COMMAND, _gate_disabled),
