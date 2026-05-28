@@ -1912,6 +1912,22 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
                 )
             return
+        # ---- Force-join warning message ----
+        if sub == "joinmsg":
+            _AWAIT_INPUT[uid] = ("cust_joinmsg", None)
+            cur = await get_ui_force_join()
+            await q.edit_message_text(
+                "<b>Edit Join-Warning Text</b>\n\n"
+                "Send the new warning message as your next message. "
+                "HTML formatting and embedded text-links are preserved.\n"
+                "Placeholders: <code>{channel}</code> (channel username), "
+                "<code>{link}</code> (full https://t.me/&lt;channel&gt; URL).\n"
+                "Send <code>reset</code> to restore the default.\n\n"
+                f"<b>Current:</b>\n{escape_html(cur)[:1500]}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                disable_web_page_preview=True,
+            )
+            return
 
     # Toggle a single command on/off
     if data.startswith("tg:"):
