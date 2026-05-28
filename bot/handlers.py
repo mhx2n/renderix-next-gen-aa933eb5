@@ -2457,6 +2457,29 @@ def register_handlers(app: Application):
         group=-1,
     )
 
+    # Global gate: force-join check. Runs before every command handler so that
+    # tool-pack commands (textenc/language/ocr/etc.) cannot bypass it.
+    async def _gate_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        if not msg:
+            return
+        text = (msg.text or msg.caption or "")
+        if not text.startswith("/"):
+            return
+        # Skip the setchannel command so the owner can always reconfigure.
+        import re as _re
+        m = _re.match(r"/([A-Za-z0-9_]+)", text)
+        cmd = (m.group(1).lower() if m else "")
+        if cmd in ("start", "setchannel"):
+            return
+        if not await force_join_ok(update, context):
+            raise ApplicationHandlerStop
+
+    app.add_handler(
+        MessageHandler(filters.COMMAND, _gate_force_join),
+        group=-1,
+    )
+
     # User
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help",  cmd_help))
