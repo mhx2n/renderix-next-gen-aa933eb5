@@ -16,6 +16,7 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, InlineQueryHandler, TypeHandler, filters,
 )
+from telegram import MessageEntity
 
 from . import db, downloader
 from .config import OWNER_ID, FORCE_JOIN_CHANNEL
