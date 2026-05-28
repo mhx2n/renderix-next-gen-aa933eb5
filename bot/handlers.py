@@ -402,6 +402,9 @@ async def cust_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📂 Rename Category", callback_data="cust:cat")],
         [InlineKeyboardButton("➕ Add Main-Menu Button", callback_data="cust:btnadd")],
         [InlineKeyboardButton("➖ Remove Main-Menu Button", callback_data="cust:btndel")],
+        [InlineKeyboardButton("🙏 Edit Group Thank-You", callback_data="cust:thanks")],
+        [InlineKeyboardButton("➕ Add Thank-You Button", callback_data="cust:tbnadd")],
+        [InlineKeyboardButton("➖ Remove Thank-You Button", callback_data="cust:tbndel")],
         [InlineKeyboardButton("♻️ Reset All", callback_data="cust:reset")],
         [InlineKeyboardButton("« Owner Panel", callback_data="m:owner")],
     ])
