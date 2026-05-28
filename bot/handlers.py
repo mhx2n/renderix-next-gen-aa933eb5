@@ -2219,6 +2219,51 @@ async def _gate_disabled(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def register_handlers(app: Application):
+    pass  # placeholder anchor
+
+
+async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """When the bot itself is added to a group, send a professional thank-you
+    to whoever added it. Owner can fully customize the text + inline buttons."""
+    msg = update.effective_message
+    if not msg or not msg.new_chat_members:
+        return
+    bot_id = context.bot.id
+    if not any(m.id == bot_id for m in msg.new_chat_members):
+        return  # someone else was added, not us
+    adder_user = msg.from_user
+    if adder_user:
+        adder = f"<a href=\"tg://user?id={adder_user.id}\">" \
+                f"{escape_html(adder_user.first_name or 'there')}</a>"
+    else:
+        adder = "there"
+    chat_title = escape_html((update.effective_chat.title if update.effective_chat else "") or "this group")
+    template = await get_ui_thanks()
+    try:
+        body = template.replace("{adder}", adder).replace("{chat}", chat_title)
+    except Exception:
+        body = template
+    kb = thanks_kb(await get_ui_thanks_buttons())
+    try:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=body,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=kb,
+        )
+    except Exception:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=clean_text(body),
+                reply_markup=kb,
+            )
+        except Exception as e:
+            await db.log("ERROR", 0, "thanks", str(e)[:300])
+
+
+def register_handlers(app: Application):
     # Allow every command to be invoked with a leading "." in addition to "/".
     # We rewrite the incoming message text/caption BEFORE any handler runs so
     # that PTB's CommandHandler matches naturally.
