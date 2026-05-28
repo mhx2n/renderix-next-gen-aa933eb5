@@ -14,7 +14,7 @@ from telegram import (
 from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ContextTypes, InlineQueryHandler, filters,
+    ContextTypes, InlineQueryHandler, TypeHandler, filters,
 )
 
 from . import db, downloader
