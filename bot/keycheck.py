@@ -263,6 +263,15 @@ async def inspect_key(key: str) -> dict:
 
 async def try_model(key: str, model: str, prompt: str) -> str:
     provider = _detect(key)
+    m_lower = (model or "").lower()
+    # Friendly guard: non-chat models (embeddings, transcription, image, tts, etc.)
+    NON_CHAT_HINTS = ("embed", "embedding", "transcribe", "whisper", "tts", "speech",
+                      "image", "vision-encoder", "rerank", "moderation")
+    if any(h in m_lower for h in NON_CHAT_HINTS):
+        raise RuntimeError(
+            f"'{model}' is not a chat model. /tryke only supports chat/completions models. "
+            f"Try a chat model like command-a-03-2025 or command-r-plus-08-2024."
+        )
     async with aiohttp.ClientSession() as session:
         if provider == "anthropic":
             s, data, _ = await _fetch_json(session, "POST", "https://api.anthropic.com/v1/messages",
@@ -286,6 +295,22 @@ async def try_model(key: str, model: str, prompt: str) -> str:
             parts = cands[0].get("content", {}).get("parts", [])
             return "".join(p.get("text", "") for p in parts)
 
+        if provider == "cohere":
+            # Use native Cohere v2 chat API — the /compatibility/v1 layer
+            # rejects many newer command-* models.
+            s, data, _ = await _fetch_json(session, "POST",
+                "https://api.cohere.com/v2/chat",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"model": model,
+                      "messages": [{"role": "user", "content": prompt}]})
+            if s != 200:
+                raise RuntimeError(f"HTTP {s}: {data}")
+            msg = data.get("message", {}) or {}
+            content = msg.get("content", []) or []
+            if isinstance(content, list):
+                return "".join(c.get("text", "") for c in content if isinstance(c, dict))
+            return str(content)
+
         # OpenAI-compatible (openai, groq, openrouter, deepseek, xai, together, cohere v2 compat)
         base = {
             "openai": "https://api.openai.com/v1",
@@ -294,7 +319,6 @@ async def try_model(key: str, model: str, prompt: str) -> str:
             "deepseek": "https://api.deepseek.com/v1",
             "xai": "https://api.x.ai/v1",
             "together": "https://api.together.xyz/v1",
-            "cohere": "https://api.cohere.com/compatibility/v1",
             "mistral": "https://api.mistral.ai/v1",
             "perplexity": "https://api.perplexity.ai",
             "fireworks": "https://api.fireworks.ai/inference/v1",
