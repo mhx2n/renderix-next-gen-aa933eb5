@@ -1730,7 +1730,18 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await db.set_setting("ui_welcome", "")
                 await msg.reply_text("Welcome text reset to default.")
             else:
-                await db.set_setting("ui_welcome", text)
+                # Preserve Telegram-formatted entities (text_link, bold, etc.)
+                # by converting them to HTML before storing.
+                try:
+                    rich = msg.text_html_urled or msg.caption_html_urled
+                except Exception:
+                    rich = None
+                if not rich:
+                    try:
+                        rich = msg.text_html or msg.caption_html
+                    except Exception:
+                        rich = None
+                await db.set_setting("ui_welcome", rich or text)
                 await msg.reply_text("Welcome text updated. Tap /start to preview.")
             return
         if kind == "cust_label":
