@@ -2019,6 +2019,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text.startswith("."):
         first, _, rest = text[1:].partition(" ")
         cmd = first.lower()
+        # Sensitive commands cannot run in groups (privacy).
+        chat_type = update.effective_chat.type if update.effective_chat else "private"
+        if cmd in _PRIVATE_ONLY_CMDS and chat_type in ("group", "supergroup"):
+            try:
+                await msg.reply_text(
+                    "🔒 This is a sensitive command. Please use it in my private inbox."
+                )
+            except Exception:
+                pass
+            return
         if cmd in REGISTRY:
             await _call_provider(update, context, cmd, rest); return
         alias = {
