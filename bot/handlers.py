@@ -16,6 +16,7 @@ from telegram.error import NetworkError, TimedOut, TelegramError
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, InlineQueryHandler, TypeHandler, filters,
+    ApplicationHandlerStop,
 )
 from telegram import MessageEntity
 
@@ -42,6 +43,24 @@ _UPLOAD_SEM = asyncio.Semaphore(2)    # uploads can run in parallel for better t
 _DOWNLOAD_QUEUE = 0
 _DOWNLOAD_QUEUE_LOCK = asyncio.Lock()
 _PROCESS_STARTED_AT = int(time.time())
+
+# Sensitive commands that must only be usable in private chat.
+# Any attempt in a group/supergroup is rejected with a hint.
+_PRIVATE_ONLY_CMDS = {
+    "key", "tryke", "mkey", "mlimit",
+    "owner", "stats", "logs", "users", "setchannel",
+    "ban", "unban", "grant", "revoke",
+    "announce", "live", "speak", "restart",
+    "addmodel", "addprovider", "delprovider", "providers",
+}
+
+
+DEFAULT_THANKS = (
+    "Hello {adder}! 🙏\n\n"
+    "Thank you for adding me to <b>{chat}</b>. "
+    "I'm now ready to assist this group.\n\n"
+    "Tap /start to explore what I can do, or /help for the full command list."
+)
 
 
 # ============================================================
