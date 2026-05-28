@@ -1770,6 +1770,65 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
                 )
             return
+        # ---- Group thank-you message (text) ----
+        if sub == "thanks":
+            _AWAIT_INPUT[uid] = ("cust_thanks", None)
+            cur = await get_ui_thanks()
+            await q.edit_message_text(
+                "<b>Edit Group Thank-You</b>\n\n"
+                "Send the new thank-you text as your next message. "
+                "HTML formatting and text-links are preserved.\n"
+                "Placeholders: <code>{adder}</code> (who added the bot), "
+                "<code>{chat}</code> (group title).\n"
+                "Send <code>reset</code> to restore the default.\n\n"
+                f"<b>Current:</b>\n{escape_html(cur)[:1500]}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                disable_web_page_preview=True,
+            )
+            return
+        # ---- Thank-you message buttons ----
+        if sub == "tbnadd":
+            _AWAIT_INPUT[uid] = ("cust_tbnadd", None)
+            cur = await get_ui_thanks_buttons()
+            lines = "\n".join(f"• {escape_html(b['label'])} — {escape_html(b['url'])}" for b in cur) or "(none)"
+            await q.edit_message_text(
+                "<b>Add Thank-You Button</b>\n\n"
+                "Send: <code>&lt;label&gt; | &lt;url&gt;</code>\n"
+                "Example: <code>Owner | https://t.me/yourname</code>\n\n"
+                f"<b>Current ({len(cur)}/8):</b>\n{lines}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "tbndel":
+            cur = await get_ui_thanks_buttons()
+            if not cur:
+                await q.edit_message_text(
+                    "<b>No thank-you buttons to remove.</b>",
+                    parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                )
+                return
+            rows = [[InlineKeyboardButton(f"❌ {b['label']}", callback_data=f"cust:tbnrm:{i}")]
+                    for i, b in enumerate(cur)]
+            rows.append([InlineKeyboardButton("« Back", callback_data="ow:cust")])
+            await q.edit_message_text(
+                "<b>Tap a thank-you button to remove it.</b>",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows),
+            )
+            return
+        if sub.startswith("tbnrm:"):
+            try:
+                idx = int(sub.split(":", 1)[1])
+            except Exception:
+                return
+            cur = await get_ui_thanks_buttons()
+            if 0 <= idx < len(cur):
+                removed = cur.pop(idx)
+                await _set_json_setting("ui_thanks_buttons", cur)
+                await q.edit_message_text(
+                    f"<b>Removed:</b> {escape_html(removed['label'])}",
+                    parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                )
+            return
 
     # Toggle a single command on/off
     if data.startswith("tg:"):
