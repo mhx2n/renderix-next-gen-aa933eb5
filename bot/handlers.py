@@ -1925,6 +1925,31 @@ async def _gate_disabled(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def register_handlers(app: Application):
+    # Allow every command to be invoked with a leading "." in addition to "/".
+    # We rewrite the incoming message text/caption BEFORE any handler runs so
+    # that PTB's CommandHandler matches naturally.
+    async def _dot_prefix_rewriter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        if not msg:
+            return
+        for attr in ("text", "caption"):
+            val = getattr(msg, attr, None)
+            if not val or not val.startswith("."):
+                continue
+            # Must look like ".word..." — first char after dot is a letter/digit/underscore.
+            if len(val) < 2 or not (val[1].isalnum() or val[1] == "_"):
+                continue
+            new_val = "/" + val[1:]
+            try:
+                object.__setattr__(msg, attr, new_val)
+            except Exception:
+                try:
+                    setattr(msg, attr, new_val)
+                except Exception:
+                    pass
+
+    app.add_handler(TypeHandler(Update, _dot_prefix_rewriter), group=-3)
+
     # Global gate: blocks disabled commands for non-owners (highest priority).
     app.add_handler(
         MessageHandler(filters.COMMAND, _gate_disabled),
