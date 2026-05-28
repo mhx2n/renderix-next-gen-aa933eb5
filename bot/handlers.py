@@ -543,6 +543,21 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
                          provider_key: str, prompt: str):
     if not await force_join_ok(update, context): return
+    # In groups, AI providers must ONLY respond when the user is replying
+    # to one of the bot's previous AI messages (an existing AI session).
+    # Standalone /g, /co, /pr, etc. in groups stay silent — keeps noise low.
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    if chat_type in ("group", "supergroup"):
+        rep0 = update.effective_message.reply_to_message
+        is_reply_to_ai = False
+        if rep0 and rep0.from_user and rep0.from_user.id == context.bot.id:
+            try:
+                sess0 = await db.get_session(update.effective_chat.id, rep0.message_id)
+                is_reply_to_ai = bool(sess0)
+            except Exception:
+                is_reply_to_ai = False
+        if not is_reply_to_ai:
+            return
     if not prompt.strip():
         await update.effective_message.reply_text("Please provide a question after the command.")
         return
