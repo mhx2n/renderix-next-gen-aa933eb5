@@ -49,6 +49,11 @@ async def _amain():
         ApplicationBuilder()
         .token(BOT_TOKEN)
         .concurrent_updates(True)   # multi-user concurrency
+        .connection_pool_size(32)
+        .pool_timeout(60)
+        .connect_timeout(30)
+        .read_timeout(120)
+        .write_timeout(120)
         .build()
     )
 
