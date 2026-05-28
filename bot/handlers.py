@@ -12,6 +12,7 @@ from telegram import (
     InlineQueryResultArticle, InputTextMessageContent,
 )
 from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
+from telegram.error import NetworkError, TimedOut, TelegramError
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, InlineQueryHandler, TypeHandler, filters,
@@ -37,6 +38,7 @@ _PENDING_KEY: dict = {}     # user_id -> last inspected api key
 _PENDING_KIND: dict = {}    # user_id -> resolved provider kind ("openai", "cohere", ...)
 _AWAIT_INPUT: dict = {}     # user_id -> ("key"|"download"|"tryke"|"announce"|"speak_to"|"grant"|"revoke")
 _DOWNLOAD_SEM = asyncio.Semaphore(1)  # keep free hosting stable: one download at a time
+_UPLOAD_SEM = asyncio.Semaphore(2)    # uploads can run in parallel for better throughput
 _DOWNLOAD_QUEUE = 0
 _DOWNLOAD_QUEUE_LOCK = asyncio.Lock()
 _PROCESS_STARTED_AT = int(time.time())
@@ -705,6 +707,7 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
         f"Queued for {kind} download…\nAhead of you: {max(0, queue_position - 1)}"
     )
     info = None
+    stage = "queued"
     loop = asyncio.get_running_loop()
     last_edit = {"t": 0.0, "text": ""}
 
@@ -750,24 +753,31 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
             except Exception:
                 pass
         async with _DOWNLOAD_SEM:
+            stage = "downloading"
             try:
-                await status.edit_text(f"Starting {kind} download…")
-            except Exception:
-                pass
-            await context.bot.send_chat_action(
-                chat_id,
-                ChatAction.UPLOAD_VOICE if audio_only else ChatAction.UPLOAD_VIDEO,
-            )
-            info = await asyncio.wait_for(
-                downloader.download(url, progress=_on_progress, audio_only=audio_only),
-                timeout=420,
-            )
+                try:
+                    await status.edit_text(f"Starting {kind} download…")
+                except Exception:
+                    pass
+                info = await asyncio.wait_for(
+                    downloader.download(url, progress=_on_progress, audio_only=audio_only),
+                    timeout=240,
+                )
+            finally:
+                async with _DOWNLOAD_QUEUE_LOCK:
+                    _DOWNLOAD_QUEUE = max(0, _DOWNLOAD_QUEUE - 1)
+        stage = "uploading"
+        async with _UPLOAD_SEM:
             try:
                 await status.edit_text(
                     f"Uploading {kind}…\n"
                     f"Size: {human_size(info['size'])}"
                 )
             except Exception: pass
+            await context.bot.send_chat_action(
+                chat_id,
+                ChatAction.UPLOAD_VOICE if audio_only else ChatAction.UPLOAD_VIDEO,
+            )
             title = clean_text(info.get("title") or ("Audio" if info.get("audio_only") else "Video"))
             uploader = clean_text(info.get("uploader") or "Unknown source")
             caption = clean_text(f"{title}\n{uploader} • {human_size(info['size'])}")[:900]
@@ -780,7 +790,8 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         title=info.get("title") or None,
                         performer=info.get("uploader") or None,
                         duration=info.get("duration") or None,
-                        write_timeout=240, read_timeout=240,
+                        write_timeout=900, read_timeout=900,
+                        connect_timeout=60, pool_timeout=60,
                     )
                 else:
                     await context.bot.send_video(
@@ -789,22 +800,50 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         duration=info.get("duration") or None,
                         width=width,
                         height=height,
-                        write_timeout=240, read_timeout=240,
+                        write_timeout=900, read_timeout=900,
+                        connect_timeout=60, pool_timeout=60,
                     )
             try: await status.delete()
             except Exception: pass
         await db.log("INFO", update.effective_user.id, "dl", url[:200])
     except asyncio.TimeoutError:
-        try: await status.edit_text("Download timed out. Please try again.")
-        except Exception: pass
-        await db.log("ERROR", update.effective_user.id, "dl", f"{url} | timeout")
+        try:
+            if stage == "uploading":
+                await status.edit_text(
+                    f"Upload timed out while sending the {kind} to Telegram.\n"
+                    "The file was prepared, but Telegram responded too slowly. Please try again."
+                )
+            else:
+                await status.edit_text("Download timed out. The remote site is responding too slowly. Please try again.")
+        except Exception:
+            pass
+        await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {stage} timeout")
+    except (TimedOut, NetworkError) as e:
+        try:
+            if stage == "uploading":
+                await status.edit_text(
+                    f"Telegram upload slowed down for this {kind}.\n"
+                    "Please retry — the queue is no longer blocked by one slow upload."
+                )
+            else:
+                await status.edit_text(f"Download failed:\n{downloader.user_error_text(e)}")
+        except Exception:
+            pass
+        await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {stage} {type(e).__name__}: {e}")
+    except TelegramError as e:
+        try:
+            await status.edit_text(
+                f"Could not send the {kind} to Telegram.\n"
+                "Try the link again — if it repeats, the file format or Telegram network may be the cause."
+            )
+        except Exception:
+            pass
+        await db.log("ERROR", update.effective_user.id, "dl", f"{url} | telegram {type(e).__name__}: {e}")
     except Exception as e:
         try: await status.edit_text(f"Download failed:\n{downloader.user_error_text(e)}")
         except Exception: pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {type(e).__name__}: {e}")
     finally:
-        async with _DOWNLOAD_QUEUE_LOCK:
-            _DOWNLOAD_QUEUE = max(0, _DOWNLOAD_QUEUE - 1)
         if info: downloader.cleanup(info)
 
 
