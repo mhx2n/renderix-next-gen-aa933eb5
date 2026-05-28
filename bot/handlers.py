@@ -227,6 +227,18 @@ async def get_ui_welcome() -> str:
     return (await db.get_setting("ui_welcome", "")) or DEFAULT_WELCOME
 
 
+async def get_ui_main_buttons() -> list:
+    """List of custom owner-defined main-menu buttons: [{label, url}]."""
+    data = await _get_json_setting("ui_main_buttons", [])
+    if not isinstance(data, list):
+        return []
+    out = []
+    for b in data:
+        if isinstance(b, dict) and b.get("label") and b.get("url"):
+            out.append({"label": str(b["label"])[:48], "url": str(b["url"])[:256]})
+    return out
+
+
 # ============================================================
 # Main menus (inline keyboards)
 # ============================================================
@@ -243,6 +255,12 @@ async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
         if len(row) == width:
             rows.append(row); row = []
     if row: rows.append(row)
+    # Owner-defined custom URL buttons (one per row)
+    for b in await get_ui_main_buttons():
+        try:
+            rows.append([InlineKeyboardButton(b["label"], url=b["url"])])
+        except Exception:
+            continue
     if is_owner(uid):
         rows.append([InlineKeyboardButton("⚙️ Owner Panel", callback_data="m:owner")])
     return InlineKeyboardMarkup(rows)
