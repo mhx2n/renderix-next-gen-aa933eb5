@@ -2102,6 +2102,26 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _set_json_setting("ui_thanks_buttons", cur)
             await msg.reply_text(f"Added thank-you button: {label[:48]} → {url[:256]}")
             return
+        if kind == "cust_joinmsg":
+            if text.strip().lower() == "reset":
+                await db.set_setting("ui_force_join", "")
+                await msg.reply_text("Join-warning text reset to default.")
+            else:
+                try:
+                    rich = msg.text_html_urled or msg.caption_html_urled
+                except Exception:
+                    rich = None
+                if not rich:
+                    try:
+                        rich = msg.text_html or msg.caption_html
+                    except Exception:
+                        rich = None
+                await db.set_setting("ui_force_join", rich or text)
+                await msg.reply_text(
+                    "Join-warning message updated. "
+                    "Non-members will see this next time they try a command."
+                )
+            return
 
     # 2) Owner/granted speak-as-bot forward
     target = await db.get_speak_target(uid)
