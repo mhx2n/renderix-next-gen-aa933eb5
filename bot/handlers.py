@@ -1616,12 +1616,54 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         if sub == "reset":
-            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels", "ui_row_width"):
+            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels", "ui_row_width", "ui_main_buttons"):
                 await db.set_setting(k, "")
             await q.edit_message_text(
                 "<b>All UI customizations reset.</b>",
                 parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
             )
+            return
+        if sub == "btnadd":
+            _AWAIT_INPUT[uid] = ("cust_btnadd", None)
+            cur = await get_ui_main_buttons()
+            lines = "\n".join(f"• {escape_html(b['label'])} — {escape_html(b['url'])}" for b in cur) or "(none)"
+            await q.edit_message_text(
+                "<b>Add Main-Menu Button</b>\n\n"
+                "Send: <code>&lt;label&gt; | &lt;url&gt;</code>\n"
+                "Example: <code>Join Channel | https://t.me/yourchannel</code>\n\n"
+                f"<b>Current ({len(cur)}/8):</b>\n{lines}",
+                parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+            )
+            return
+        if sub == "btndel":
+            cur = await get_ui_main_buttons()
+            if not cur:
+                await q.edit_message_text(
+                    "<b>No custom main-menu buttons to remove.</b>",
+                    parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                )
+                return
+            rows = [[InlineKeyboardButton(f"❌ {b['label']}", callback_data=f"cust:btnrm:{i}")]
+                    for i, b in enumerate(cur)]
+            rows.append([InlineKeyboardButton("« Back", callback_data="ow:cust")])
+            await q.edit_message_text(
+                "<b>Tap a button to remove it.</b>",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows),
+            )
+            return
+        if sub.startswith("btnrm:"):
+            try:
+                idx = int(sub.split(":", 1)[1])
+            except Exception:
+                return
+            cur = await get_ui_main_buttons()
+            if 0 <= idx < len(cur):
+                removed = cur.pop(idx)
+                await _set_json_setting("ui_main_buttons", cur)
+                await q.edit_message_text(
+                    f"<b>Removed:</b> {escape_html(removed['label'])}",
+                    parse_mode=ParseMode.HTML, reply_markup=await cust_kb(),
+                )
             return
 
     # Toggle a single command on/off
