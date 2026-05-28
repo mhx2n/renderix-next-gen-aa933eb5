@@ -2262,10 +2262,35 @@ def register_handlers(app: Application):
 
     app.add_handler(TypeHandler(Update, _dot_prefix_rewriter), group=-3)
 
+    # Block sensitive commands from being run in group chats.
+    async def _gate_private_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        chat = update.effective_chat
+        if not msg or not chat or chat.type not in ("group", "supergroup"):
+            return
+        text = (msg.text or msg.caption or "")
+        if not text.startswith("/"):
+            return
+        import re as _re
+        m = _re.match(r"/([A-Za-z0-9_]+)", text)
+        if not m:
+            return
+        cmd = m.group(1).lower()
+        if cmd in _PRIVATE_ONLY_CMDS:
+            try:
+                await msg.reply_text(
+                    "🔒 This is a sensitive command. Please use it in my private inbox."
+                )
+            except Exception:
+                pass
+            raise ApplicationHandlerStop
+
+    app.add_handler(MessageHandler(filters.COMMAND, _gate_private_only), group=-2)
+
     # Global gate: blocks disabled commands for non-owners (highest priority).
     app.add_handler(
         MessageHandler(filters.COMMAND, _gate_disabled),
-        group=-2,
+        group=-1,
     )
 
     # User
@@ -2321,4 +2346,13 @@ def register_handlers(app: Application):
     )
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+
+    # Thank-you when the bot is added to a group/supergroup.
+    app.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.NEW_CHAT_MEMBERS,
+            on_new_chat_members,
+        )
+    )
+
     app.add_error_handler(on_error)
