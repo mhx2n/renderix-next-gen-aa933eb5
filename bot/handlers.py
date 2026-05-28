@@ -260,6 +260,33 @@ async def get_ui_main_buttons() -> list:
     return out
 
 
+async def get_ui_thanks() -> str:
+    return (await db.get_setting("ui_thanks", "")) or DEFAULT_THANKS
+
+
+async def get_ui_thanks_buttons() -> list:
+    data = await _get_json_setting("ui_thanks_buttons", [])
+    if not isinstance(data, list):
+        return []
+    out = []
+    for b in data:
+        if isinstance(b, dict) and b.get("label") and b.get("url"):
+            out.append({"label": str(b["label"])[:48], "url": str(b["url"])[:256]})
+    return out
+
+
+def thanks_kb(buttons: list) -> InlineKeyboardMarkup | None:
+    if not buttons:
+        return None
+    rows = []
+    for b in buttons:
+        try:
+            rows.append([InlineKeyboardButton(b["label"], url=b["url"])])
+        except Exception:
+            continue
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
 # ============================================================
 # Main menus (inline keyboards)
 # ============================================================
