@@ -1719,7 +1719,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         if sub == "reset":
-            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels", "ui_row_width", "ui_main_buttons"):
+            for k in ("ui_welcome", "ui_labels", "ui_emojis", "ui_cat_labels",
+                      "ui_row_width", "ui_main_buttons",
+                      "ui_thanks", "ui_thanks_buttons"):
                 await db.set_setting(k, "")
             await q.edit_message_text(
                 "<b>All UI customizations reset.</b>",
