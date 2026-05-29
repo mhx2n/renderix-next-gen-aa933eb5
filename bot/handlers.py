@@ -363,6 +363,7 @@ async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton(b["label"], url=b["url"])])
         except Exception:
             continue
+    rows.append([InlineKeyboardButton("🏆 Top Users", callback_data="m:top")])
     if is_owner(uid):
         rows.append([InlineKeyboardButton("⚙️ Owner Panel", callback_data="m:owner")])
     return InlineKeyboardMarkup(rows)
@@ -433,7 +434,8 @@ def dl_kb() -> InlineKeyboardMarkup:
 def owner_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Stats", callback_data="ow:stats"),
-         InlineKeyboardButton("Logs", callback_data="ow:logs")],
+         InlineKeyboardButton("📊 Bot State", callback_data="ow:state")],
+        [InlineKeyboardButton("Logs", callback_data="ow:logs")],
         [InlineKeyboardButton("Users", callback_data="ow:users"),
          InlineKeyboardButton("Announce", callback_data="ow:announce")],
         [InlineKeyboardButton("Speak as Bot", callback_data="ow:speak"),
@@ -499,6 +501,17 @@ def back_home_kb() -> InlineKeyboardMarkup:
 # ============================================================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await db.upsert_user(update.effective_user)
+    try:
+        await db.log_start(update.effective_user.id if update.effective_user else 0)
+    except Exception:
+        pass
+    # If /start fires inside a group, remember it for the usage report.
+    try:
+        chat = update.effective_chat
+        if chat and chat.type in ("group", "supergroup"):
+            await db.add_group(chat.id, chat.title or "")
+    except Exception:
+        pass
     if not await force_join_ok(update, context):
         return
     name = escape_html(update.effective_user.first_name or "there")
@@ -965,7 +978,7 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     "Please retry — the queue is no longer blocked by one slow upload."
                 )
             else:
-                await status.edit_text(f"Download failed:\n{downloader.user_error_text(e)}")
+                await status.edit_text(downloader.user_error_text(e), parse_mode=ParseMode.HTML)
         except Exception:
             pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {stage} {type(e).__name__}: {e}")
@@ -979,7 +992,7 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
             pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | telegram {type(e).__name__}: {e}")
     except Exception as e:
-        try: await status.edit_text(f"Download failed:\n{downloader.user_error_text(e)}")
+        try: await status.edit_text(downloader.user_error_text(e), parse_mode=ParseMode.HTML)
         except Exception: pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {type(e).__name__}: {e}")
     finally:
@@ -1609,6 +1622,25 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_owner(uid): return
         await q.edit_message_text("Owner panel:", reply_markup=owner_kb()); return
 
+    if data == "m:top":
+        rows = await db.top_users(10)
+        medals = ["🥇", "🥈", "🥉"]
+        lines = ["🏆 <b>Top 10 Users (All-time)</b>", "━━━━━━━━━━━━━━━━━━"]
+        if not rows:
+            lines.append("\nNo users yet.")
+        else:
+            for i, (u_id, first, uname, _msgs) in enumerate(rows, start=1):
+                badge = medals[i - 1] if i <= 3 else "🔶"
+                name = (first or uname or "").strip()
+                name_html = f" {escape_html(name)}" if name else ""
+                lines.append(f"\n{badge} <b>{i}.</b>{name_html}\n   - <b>User Id:</b> <code>{u_id}</code>")
+        await q.edit_message_text(
+            "\n".join(lines),
+            parse_mode=ParseMode.HTML,
+            reply_markup=back_home_kb(),
+        )
+        return
+
     if data.startswith("pick:"):
         k = data.split(":", 1)[1]
         name = REGISTRY.get(k, (k,))[0]
@@ -1670,6 +1702,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Messages: <code>{s['messages']}</code> | Errors: <code>{s['errors']}</code>\n"
                 f"Channel: <code>{escape_html(ch)}</code> | Live: <code>{escape_html(live)}</code>",
                 parse_mode=ParseMode.HTML, reply_markup=owner_kb())
+            return
+        if sub == "state":
+            try:
+                rep = await db.usage_report()
+            except Exception as e:
+                await q.edit_message_text(f"Could not load state: {escape_html(str(e))}",
+                                          reply_markup=owner_kb())
+                return
+            txt = (
+                "📊 <b>Bot Usage Report</b>\n"
+                "━━━━━━━━━━━━━━━━━━\n\n"
+                "🚀 <b>User Engagements:</b>\n"
+                f"- Daily Starts: {rep['daily']}\n"
+                f"- Weekly Starts: {rep['weekly']}\n"
+                f"- Monthly Starts: {rep['monthly']}\n"
+                f"- Annual Starts: {rep['annual']}\n\n"
+                "📈 <b>Total Metrics:</b>\n"
+                f"- Total Groups: {rep['groups']}\n"
+                f"- Users Registered: {rep['users']}"
+            )
+            await q.edit_message_text(txt, parse_mode=ParseMode.HTML, reply_markup=owner_kb())
             return
         if sub == "logs":
             rows = await db.get_logs(15)
@@ -2342,6 +2395,12 @@ async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE
     bot_id = context.bot.id
     if not any(m.id == bot_id for m in msg.new_chat_members):
         return  # someone else was added, not us
+    try:
+        chat = update.effective_chat
+        if chat:
+            await db.add_group(chat.id, chat.title or "")
+    except Exception:
+        pass
     adder_user = msg.from_user
     if adder_user:
         adder = f"<a href=\"tg://user?id={adder_user.id}\">" \
@@ -2532,6 +2591,21 @@ def register_handlers(app: Application):
             filters.StatusUpdate.NEW_CHAT_MEMBERS,
             on_new_chat_members,
         )
+    )
+
+    async def _on_left_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        if not msg or not msg.left_chat_member:
+            return
+        if msg.left_chat_member.id != context.bot.id:
+            return
+        try:
+            if update.effective_chat:
+                await db.remove_group(update.effective_chat.id)
+        except Exception:
+            pass
+    app.add_handler(
+        MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, _on_left_chat_member)
     )
 
     app.add_error_handler(on_error)
