@@ -680,50 +680,15 @@ def user_error_text(err: Exception) -> str:
     if m:
         platform = m.group(1).lower()
         low = m.group(2).lower()
-    if ("sign in to confirm" in low or "confirm you" in low) and platform == "youtube":
-        return (
-            "YouTube is asking for sign-in verification on the server.\n"
-            "Owner fix: export fresh YouTube cookies into youtube_cookies.txt "
-            "from a real browser session, then redeploy/restart the bot."
-        )
-    if platform == "tiktok":
-        if "unable to extract webpage video data" in low or "empty media response" in low:
-            return (
-                "TikTok blocked this short link or did not expose the video stream right now.\n"
-                "Try opening the link once in a browser, copy the full TikTok video URL, then send that link again."
-            )
-        if "login required" in low or "private" in low or "status code 403" in low or "forbidden" in low:
-            return (
-                "This TikTok post is restricted from the server right now.\n"
-                "Try a public full video link, or refresh TikTok-access cookies/headers on the server."
-            )
-    if "login required" in low or "private" in low:
-        return "This post is private or requires login."
-    if platform in {"facebook", "instagram"} and (
-        "cannot parse data" in low
-        or "no video formats found" in low
-        or "blocked or hid" in low
-    ):
-        return (
-            f"{platform.title()} reel/video link টি server থেকে playable stream দিচ্ছে না।\n"
-            f"Final public reel URL পাঠান। যদি তবুও fail করে, owner-কে fresh {platform.title()} cookies যোগ করতে হবে।"
-        )
-    if "age" in low and "restricted" in low:
-        return "Age-restricted content cannot be downloaded without login."
-    if "too long" in low or "too large" in low or "max " in low:
-        return (
-            "This video is too large for Telegram's 50 MB bot upload limit. "
-            "Try a shorter clip or a lower-quality source."
-        )
-    if "converted file is still too large" in low:
-        return "The video could be prepared, but it is still too large to send in Telegram."
-    if "unable to extract" in low or "empty media response" in low:
-        return "This link did not expose a downloadable video stream."
-    if "timed out" in low or "timeout" in low:
-        return "The remote site took too long to respond. Please try again."
+    # Keep a couple of useful, neutral cases — everything else collapses to the
+    # single clean "no downloadable video" message in bold English.
+    if "too long" in low or "too large" in low or "max " in low or "converted file is still too large" in low:
+        return "<b>File is too large to send on Telegram ❌</b>"
     if "only facebook, instagram, and tiktok links are allowed" in low or "unsupported url" in low:
-        return "Only Facebook, Instagram, and TikTok links are supported in this bot."
-    return "Download failed. Please try another link or try again later."
+        return "<b>Only Facebook, Instagram and TikTok links are supported ❌</b>"
+    if "timed out" in low or "timeout" in low:
+        return "<b>The site took too long to respond. Please try again ❌</b>"
+    return "<b>No downloadable video was found ❌</b>"
 
 
 def cleanup(info: dict):
