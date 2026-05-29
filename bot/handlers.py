@@ -2554,6 +2554,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("help",  cmd_help))
     app.add_handler(CommandHandler("menu",  cmd_menu))
     app.add_handler(CommandHandler("ping",  cmd_ping))
+    app.add_handler(CommandHandler("top",   cmd_top))
     app.add_handler(CommandHandler("key",   cmd_key))
     app.add_handler(CommandHandler("tryke", cmd_tryke))
     app.add_handler(CommandHandler("dl",    cmd_dl))
