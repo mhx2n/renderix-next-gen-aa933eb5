@@ -1593,6 +1593,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if data.startswith("tool:"):
         cmd = data.split(":", 1)[1]
+        if cmd == "top":
+            await q.edit_message_text(
+                await _build_top_users_text(),
+                parse_mode=ParseMode.HTML,
+                reply_markup=tool_detail_kb("Utilities"),
+            )
+            return
         cat, t = _find_tool(cmd)
         if not t:
             await q.edit_message_text("Tool not found.", reply_markup=await main_menu_kb(uid)); return
