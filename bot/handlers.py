@@ -1703,6 +1703,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Channel: <code>{escape_html(ch)}</code> | Live: <code>{escape_html(live)}</code>",
                 parse_mode=ParseMode.HTML, reply_markup=owner_kb())
             return
+        if sub == "state":
+            try:
+                rep = await db.usage_report()
+            except Exception as e:
+                await q.edit_message_text(f"Could not load state: {escape_html(str(e))}",
+                                          reply_markup=owner_kb())
+                return
+            txt = (
+                "📊 <b>Bot Usage Report</b>\n"
+                "━━━━━━━━━━━━━━━━━━\n\n"
+                "🚀 <b>User Engagements:</b>\n"
+                f"- Daily Starts: {rep['daily']}\n"
+                f"- Weekly Starts: {rep['weekly']}\n"
+                f"- Monthly Starts: {rep['monthly']}\n"
+                f"- Annual Starts: {rep['annual']}\n\n"
+                "📈 <b>Total Metrics:</b>\n"
+                f"- Total Groups: {rep['groups']}\n"
+                f"- Users Registered: {rep['users']}"
+            )
+            await q.edit_message_text(txt, parse_mode=ParseMode.HTML, reply_markup=owner_kb())
+            return
         if sub == "logs":
             rows = await db.get_logs(15)
             lines = ["*Recent Logs*"]
