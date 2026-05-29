@@ -239,6 +239,7 @@ TOOL_CATALOG: dict = {
         ("dl",    "Video Downloader","Download high-quality playable video from Facebook, Instagram, and TikTok only (max 50MB).\n\n<b>Usage:</b> <code>/dl &lt;url&gt;</code>"),
         ("dla",   "Audio Downloader","Extract audio (mp3) from Facebook, Instagram, and TikTok links only.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
         ("short", "URL Shortener","Shorten any URL.\n\n<b>Usage:</b>\n<code>/short https://example.com/path</code>"),
+        ("top",   "Top Users",    "See the top 10 most active users of this bot.\n\n<b>Usage:</b> <code>/top</code>"),
         ("ping",  "Ping",         "Bot latency check.\n\n<b>Usage:</b> <code>/ping</code>"),
         ("help",  "Help / About", "AI-summarised help.\n\n<b>Usage:</b>\n<code>/help</code> or <code>/help &lt;topic&gt;</code>"),
     ],
@@ -363,7 +364,6 @@ async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton(b["label"], url=b["url"])])
         except Exception:
             continue
-    rows.append([InlineKeyboardButton("🏆 Top Users", callback_data="m:top")])
     if is_owner(uid):
         rows.append([InlineKeyboardButton("⚙️ Owner Panel", callback_data="m:owner")])
     return InlineKeyboardMarkup(rows)
@@ -499,6 +499,27 @@ def back_home_kb() -> InlineKeyboardMarkup:
 # ============================================================
 # Commands
 # ============================================================
+async def _build_top_users_text() -> str:
+    rows = await db.top_users(10)
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 <b>Top 10 Users (All-time)</b>", "━━━━━━━━━━━━━━━━━━"]
+    if not rows:
+        lines.append("\nNo users yet.")
+    else:
+        for i, (u_id, first, uname, _msgs) in enumerate(rows, start=1):
+            badge = medals[i - 1] if i <= 3 else "🔶"
+            name = (first or uname or "").strip()
+            name_html = f" {escape_html(name)}" if name else ""
+            lines.append(f"\n{badge} <b>{i}.</b>{name_html}\n   - <b>User Id:</b> <code>{u_id}</code>")
+    return "\n".join(lines)
+
+
+async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context): return
+    await update.effective_message.reply_text(
+        await _build_top_users_text(), parse_mode=ParseMode.HTML)
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await db.upsert_user(update.effective_user)
     try:
@@ -1593,6 +1614,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if data.startswith("tool:"):
         cmd = data.split(":", 1)[1]
+        if cmd == "top":
+            await q.edit_message_text(
+                await _build_top_users_text(),
+                parse_mode=ParseMode.HTML,
+                reply_markup=tool_detail_kb("Utilities"),
+            )
+            return
         cat, t = _find_tool(cmd)
         if not t:
             await q.edit_message_text("Tool not found.", reply_markup=await main_menu_kb(uid)); return
@@ -1622,22 +1650,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_owner(uid): return
         await q.edit_message_text("Owner panel:", reply_markup=owner_kb()); return
 
-    if data == "m:top":
-        rows = await db.top_users(10)
-        medals = ["🥇", "🥈", "🥉"]
-        lines = ["🏆 <b>Top 10 Users (All-time)</b>", "━━━━━━━━━━━━━━━━━━"]
-        if not rows:
-            lines.append("\nNo users yet.")
-        else:
-            for i, (u_id, first, uname, _msgs) in enumerate(rows, start=1):
-                badge = medals[i - 1] if i <= 3 else "🔶"
-                name = (first or uname or "").strip()
-                name_html = f" {escape_html(name)}" if name else ""
-                lines.append(f"\n{badge} <b>{i}.</b>{name_html}\n   - <b>User Id:</b> <code>{u_id}</code>")
+    if data == "m:top" or data == "tool:top":
         await q.edit_message_text(
-            "\n".join(lines),
+            await _build_top_users_text(),
             parse_mode=ParseMode.HTML,
-            reply_markup=back_home_kb(),
+            reply_markup=tool_detail_kb("Utilities") if data == "tool:top" else back_home_kb(),
         )
         return
 
@@ -2198,6 +2215,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         alias = {
             "start": cmd_start, "help": cmd_help, "menu": cmd_menu,
             "ping": cmd_ping, "key": cmd_key, "tryke": cmd_tryke, "dl": cmd_dl,
+            "top": cmd_top,
         }
         if cmd in alias:
             context.args = rest.split() if rest else []
@@ -2536,6 +2554,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("help",  cmd_help))
     app.add_handler(CommandHandler("menu",  cmd_menu))
     app.add_handler(CommandHandler("ping",  cmd_ping))
+    app.add_handler(CommandHandler("top",   cmd_top))
     app.add_handler(CommandHandler("key",   cmd_key))
     app.add_handler(CommandHandler("tryke", cmd_tryke))
     app.add_handler(CommandHandler("dl",    cmd_dl))
