@@ -2593,4 +2593,19 @@ def register_handlers(app: Application):
         )
     )
 
+    async def _on_left_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        msg = update.effective_message
+        if not msg or not msg.left_chat_member:
+            return
+        if msg.left_chat_member.id != context.bot.id:
+            return
+        try:
+            if update.effective_chat:
+                await db.remove_group(update.effective_chat.id)
+        except Exception:
+            pass
+    app.add_handler(
+        MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, _on_left_chat_member)
+    )
+
     app.add_error_handler(on_error)
