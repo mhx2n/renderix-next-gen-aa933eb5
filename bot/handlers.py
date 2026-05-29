@@ -2353,6 +2353,12 @@ async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE
     bot_id = context.bot.id
     if not any(m.id == bot_id for m in msg.new_chat_members):
         return  # someone else was added, not us
+    try:
+        chat = update.effective_chat
+        if chat:
+            await db.add_group(chat.id, chat.title or "")
+    except Exception:
+        pass
     adder_user = msg.from_user
     if adder_user:
         adder = f"<a href=\"tg://user?id={adder_user.id}\">" \
