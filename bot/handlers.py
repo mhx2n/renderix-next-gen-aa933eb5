@@ -433,7 +433,8 @@ def dl_kb() -> InlineKeyboardMarkup:
 def owner_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Stats", callback_data="ow:stats"),
-         InlineKeyboardButton("Logs", callback_data="ow:logs")],
+         InlineKeyboardButton("📊 Bot State", callback_data="ow:state")],
+        [InlineKeyboardButton("Logs", callback_data="ow:logs")],
         [InlineKeyboardButton("Users", callback_data="ow:users"),
          InlineKeyboardButton("Announce", callback_data="ow:announce")],
         [InlineKeyboardButton("Speak as Bot", callback_data="ow:speak"),
