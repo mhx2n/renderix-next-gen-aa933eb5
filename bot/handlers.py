@@ -363,6 +363,7 @@ async def main_menu_kb(uid: int) -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton(b["label"], url=b["url"])])
         except Exception:
             continue
+    rows.append([InlineKeyboardButton("🏆 Top Users", callback_data="m:top")])
     if is_owner(uid):
         rows.append([InlineKeyboardButton("⚙️ Owner Panel", callback_data="m:owner")])
     return InlineKeyboardMarkup(rows)
