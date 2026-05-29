@@ -965,7 +965,7 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     "Please retry — the queue is no longer blocked by one slow upload."
                 )
             else:
-                await status.edit_text(f"Download failed:\n{downloader.user_error_text(e)}")
+                await status.edit_text(downloader.user_error_text(e), parse_mode=ParseMode.HTML)
         except Exception:
             pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {stage} {type(e).__name__}: {e}")
@@ -979,7 +979,7 @@ async def _run_download(update: Update, context: ContextTypes.DEFAULT_TYPE,
             pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | telegram {type(e).__name__}: {e}")
     except Exception as e:
-        try: await status.edit_text(f"Download failed:\n{downloader.user_error_text(e)}")
+        try: await status.edit_text(downloader.user_error_text(e), parse_mode=ParseMode.HTML)
         except Exception: pass
         await db.log("ERROR", update.effective_user.id, "dl", f"{url} | {type(e).__name__}: {e}")
     finally:
