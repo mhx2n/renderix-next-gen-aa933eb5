@@ -499,6 +499,17 @@ def back_home_kb() -> InlineKeyboardMarkup:
 # ============================================================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await db.upsert_user(update.effective_user)
+    try:
+        await db.log_start(update.effective_user.id if update.effective_user else 0)
+    except Exception:
+        pass
+    # If /start fires inside a group, remember it for the usage report.
+    try:
+        chat = update.effective_chat
+        if chat and chat.type in ("group", "supergroup"):
+            await db.add_group(chat.id, chat.title or "")
+    except Exception:
+        pass
     if not await force_join_ok(update, context):
         return
     name = escape_html(update.effective_user.first_name or "there")
