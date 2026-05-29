@@ -2215,6 +2215,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         alias = {
             "start": cmd_start, "help": cmd_help, "menu": cmd_menu,
             "ping": cmd_ping, "key": cmd_key, "tryke": cmd_tryke, "dl": cmd_dl,
+            "top": cmd_top,
         }
         if cmd in alias:
             context.args = rest.split() if rest else []
