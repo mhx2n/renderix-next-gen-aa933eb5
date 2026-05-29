@@ -289,3 +289,57 @@ async def list_custom_providers(enabled_only: bool = True):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(query) as cur:
             return await cur.fetchall()
+
+
+# ---------- start events & groups ----------
+async def log_start(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO start_events(ts, user_id) VALUES(?, ?)",
+            (int(time.time()), int(user_id or 0)),
+        )
+        await db.commit()
+
+
+async def add_group(chat_id: int, title: str = ""):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO groups(chat_id, title, added_at, removed) VALUES(?,?,?,0)
+               ON CONFLICT(chat_id) DO UPDATE SET title=excluded.title, removed=0""",
+            (int(chat_id), title or "", int(time.time())),
+        )
+        await db.commit()
+
+
+async def remove_group(chat_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE groups SET removed=1 WHERE chat_id=?", (int(chat_id),))
+        await db.commit()
+
+
+async def usage_report() -> dict:
+    now = int(time.time())
+    spans = {"daily": 86400, "weekly": 86400 * 7, "monthly": 86400 * 30, "annual": 86400 * 365}
+    out = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        for key, sec in spans.items():
+            async with db.execute(
+                "SELECT COUNT(*) FROM start_events WHERE ts >= ?", (now - sec,)
+            ) as cur:
+                out[key] = (await cur.fetchone())[0] or 0
+        async with db.execute("SELECT COUNT(*) FROM groups WHERE removed=0") as cur:
+            out["groups"] = (await cur.fetchone())[0] or 0
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            out["users"] = (await cur.fetchone())[0] or 0
+    return out
+
+
+async def top_users(limit: int = 10):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT user_id, first_name, username, msg_count
+               FROM users WHERE is_banned=0
+               ORDER BY msg_count DESC LIMIT ?""",
+            (int(limit),),
+        ) as cur:
+            return await cur.fetchall()
