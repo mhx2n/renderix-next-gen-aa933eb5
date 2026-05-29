@@ -500,6 +500,31 @@ def back_home_kb() -> InlineKeyboardMarkup:
 # Commands
 # ============================================================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pass  # placeholder; real body below
+
+
+async def _build_top_users_text() -> str:
+    rows = await db.top_users(10)
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 <b>Top 10 Users (All-time)</b>", "━━━━━━━━━━━━━━━━━━"]
+    if not rows:
+        lines.append("\nNo users yet.")
+    else:
+        for i, (u_id, first, uname, _msgs) in enumerate(rows, start=1):
+            badge = medals[i - 1] if i <= 3 else "🔶"
+            name = (first or uname or "").strip()
+            name_html = f" {escape_html(name)}" if name else ""
+            lines.append(f"\n{badge} <b>{i}.</b>{name_html}\n   - <b>User Id:</b> <code>{u_id}</code>")
+    return "\n".join(lines)
+
+
+async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context): return
+    await update.effective_message.reply_text(
+        await _build_top_users_text(), parse_mode=ParseMode.HTML)
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await db.upsert_user(update.effective_user)
     try:
         await db.log_start(update.effective_user.id if update.effective_user else 0)
