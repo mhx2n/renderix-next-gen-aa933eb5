@@ -499,10 +499,6 @@ def back_home_kb() -> InlineKeyboardMarkup:
 # ============================================================
 # Commands
 # ============================================================
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pass  # placeholder; real body below
-
-
 async def _build_top_users_text() -> str:
     rows = await db.top_users(10)
     medals = ["🥇", "🥈", "🥉"]
