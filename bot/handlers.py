@@ -1622,22 +1622,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_owner(uid): return
         await q.edit_message_text("Owner panel:", reply_markup=owner_kb()); return
 
-    if data == "m:top":
-        rows = await db.top_users(10)
-        medals = ["🥇", "🥈", "🥉"]
-        lines = ["🏆 <b>Top 10 Users (All-time)</b>", "━━━━━━━━━━━━━━━━━━"]
-        if not rows:
-            lines.append("\nNo users yet.")
-        else:
-            for i, (u_id, first, uname, _msgs) in enumerate(rows, start=1):
-                badge = medals[i - 1] if i <= 3 else "🔶"
-                name = (first or uname or "").strip()
-                name_html = f" {escape_html(name)}" if name else ""
-                lines.append(f"\n{badge} <b>{i}.</b>{name_html}\n   - <b>User Id:</b> <code>{u_id}</code>")
+    if data == "m:top" or data == "tool:top":
         await q.edit_message_text(
-            "\n".join(lines),
+            await _build_top_users_text(),
             parse_mode=ParseMode.HTML,
-            reply_markup=back_home_kb(),
+            reply_markup=tool_detail_kb("Utilities") if data == "tool:top" else back_home_kb(),
         )
         return
 
