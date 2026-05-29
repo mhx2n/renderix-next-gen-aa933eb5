@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS usage_quota (
     count INTEGER DEFAULT 0,
     PRIMARY KEY (user_id, tool, day)
 );
+CREATE TABLE IF NOT EXISTS start_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    user_id INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_start_events_ts ON start_events(ts);
+CREATE TABLE IF NOT EXISTS groups (
+    chat_id INTEGER PRIMARY KEY,
+    title TEXT,
+    added_at INTEGER,
+    removed INTEGER DEFAULT 0
+);
 """
 
 
