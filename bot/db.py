@@ -1,6 +1,7 @@
 import aiosqlite
 import time
 from .config import DB_PATH
+from . import mongo
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -115,6 +116,21 @@ async def upsert_user(user):
             (user.id, user.username or "", user.first_name or "", now, now),
         )
         await db.commit()
+        # Mirror compact row to Mongo (fire & forget). Mongo stays small.
+        try:
+            async with db.execute(
+                "SELECT username, first_name, last_seen, first_seen, is_banned, msg_count "
+                "FROM users WHERE user_id=?", (user.id,)
+            ) as cur:
+                row = await cur.fetchone()
+        except Exception:
+            row = None
+    if row:
+        mongo.fire(mongo.upsert("users", {"_id": int(user.id)}, {
+            "username": row[0], "first_name": row[1],
+            "last_seen": row[2], "first_seen": row[3],
+            "is_banned": row[4], "msg_count": row[5],
+        }))
 
 
 async def is_banned(uid: int) -> bool:
@@ -128,6 +144,7 @@ async def set_banned(uid: int, val: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE users SET is_banned=? WHERE user_id=?", (val, uid))
         await db.commit()
+    mongo.fire(mongo.upsert("users", {"_id": int(uid)}, {"is_banned": int(val)}))
 
 
 async def log(level: str, user_id: int, provider: str, message: str):
@@ -175,6 +192,7 @@ async def set_setting(key: str, value: str):
             (key, value),
         )
         await db.commit()
+    mongo.fire(mongo.upsert("settings", {"_id": key}, {"value": value}))
 
 
 async def get_setting(key: str, default: str = "") -> str:
@@ -212,6 +230,8 @@ async def grant_speak(uid: int):
             (uid, int(time.time())),
         )
         await db.commit()
+    mongo.fire(mongo.upsert("speak_grants", {"_id": int(uid)},
+                            {"granted_at": int(time.time())}))
 
 
 async def revoke_speak(uid: int):
@@ -219,6 +239,7 @@ async def revoke_speak(uid: int):
         await db.execute("DELETE FROM speak_grants WHERE user_id=?", (uid,))
         await db.execute("DELETE FROM speak_active WHERE user_id=?", (uid,))
         await db.commit()
+    mongo.fire(mongo.delete("speak_grants", {"_id": int(uid)}))
 
 
 async def can_speak(uid: int, owner_id: int) -> bool:
@@ -272,12 +293,17 @@ async def add_custom_provider(cmd: str, name: str, base_url: str, api_key: str, 
             (cmd, name, base_url, api_key, model, now, now),
         )
         await db.commit()
+    mongo.fire(mongo.upsert("custom_providers", {"_id": cmd}, {
+        "name": name, "base_url": base_url, "api_key": api_key,
+        "model": model, "enabled": 1, "created_at": now, "updated_at": now,
+    }))
 
 
 async def remove_custom_provider(cmd: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM custom_providers WHERE cmd=?", (cmd,))
         await db.commit()
+    mongo.fire(mongo.delete("custom_providers", {"_id": cmd}))
 
 
 async def list_custom_providers(enabled_only: bool = True):
@@ -309,12 +335,16 @@ async def add_group(chat_id: int, title: str = ""):
             (int(chat_id), title or "", int(time.time())),
         )
         await db.commit()
+    mongo.fire(mongo.upsert("groups", {"_id": int(chat_id)}, {
+        "title": title or "", "added_at": int(time.time()), "removed": 0,
+    }))
 
 
 async def remove_group(chat_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE groups SET removed=1 WHERE chat_id=?", (int(chat_id),))
         await db.commit()
+    mongo.fire(mongo.upsert("groups", {"_id": int(chat_id)}, {"removed": 1}))
 
 
 async def usage_report() -> dict:
