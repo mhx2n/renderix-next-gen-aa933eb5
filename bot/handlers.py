@@ -38,6 +38,7 @@ from .tools import textenc as _textenc, language as _language, photo as _photo, 
 _HISTORY: dict = defaultdict(list)
 _PENDING_KEY: dict = {}     # user_id -> last inspected api key
 _PENDING_KIND: dict = {}    # user_id -> resolved provider kind ("openai", "cohere", ...)
+_PENDING_MODELS: dict = {}  # user_id -> {"provider":..., "models":[...], "limits":{...}}
 _AWAIT_INPUT: dict = {}     # user_id -> ("key"|"download"|"tryke"|"announce"|"speak_to"|"grant"|"revoke")
 _DOWNLOAD_SEM = asyncio.Semaphore(1)  # keep free hosting stable: one download at a time
 _UPLOAD_SEM = asyncio.Semaphore(2)    # uploads can run in parallel for better throughput
@@ -788,28 +789,63 @@ async def _do_inspect(update: Update, key: str):
             pass
         models = info.get("models", [])
         limits = info.get("limits", {})
-        lines = [
-            f"<b>{escape_html(info['provider'])}</b>  •  ACTIVE",
-            f"Models available: <b>{len(models)}</b>",
-            "",
-        ]
-        for m in models[:30]:
-            lines.append(f"• <code>{escape_html(m)}</code>")
-        if len(models) > 30:
-            lines.append(f"... +{len(models)-30} more")
-        if limits:
-            lines.append("\n<b>Limits / Quota:</b>")
-            for k, v in limits.items():
-                lines.append(f"  • {escape_html(str(k))}: <code>{escape_html(str(v))}</code>")
-        lines.append("\nTry a model: <code>/tryke &lt;model&gt; &lt;prompt&gt;</code>")
-        if is_owner(update.effective_user.id):
-            lines.append(
-                "Add as bot provider: <code>/addmodel &lt;alias&gt; &lt;model&gt;</code>"
-            )
-        await safe_edit(placeholder, "\n".join(lines))
+        uid = update.effective_user.id
+        _PENDING_MODELS[uid] = {
+            "provider": info["provider"],
+            "models": list(models),
+            "limits": limits or {},
+        }
+        text, kb = _render_models_page(uid, page=0)
+        await safe_edit(placeholder, text, reply_markup=kb)
     except Exception as e:
         await safe_edit(placeholder, safe_user_error("Key inspection"))
         await db.log("ERROR", update.effective_user.id, "key", str(e)[:500])
+
+
+# ----- Paginated model listing for /key -----
+MODELS_PAGE_SIZE = 30
+
+
+def _render_models_page(uid: int, page: int = 0) -> tuple[str, InlineKeyboardMarkup | None]:
+    data = _PENDING_MODELS.get(uid)
+    if not data:
+        return ("No inspected key. Use /key &lt;API_KEY&gt; first.", None)
+    models = data["models"]
+    total = len(models)
+    pages = max(1, (total + MODELS_PAGE_SIZE - 1) // MODELS_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    start = page * MODELS_PAGE_SIZE
+    end = min(start + MODELS_PAGE_SIZE, total)
+    lines = [
+        f"<b>{escape_html(data['provider'])}</b>  •  ACTIVE",
+        f"Models available: <b>{total}</b>  •  Page <b>{page+1}/{pages}</b>",
+        "",
+    ]
+    for m in models[start:end]:
+        lines.append(f"• <code>{escape_html(m)}</code>")
+    if data["limits"]:
+        lines.append("\n<b>Limits / Quota:</b>")
+        for k, v in data["limits"].items():
+            lines.append(f"  • {escape_html(str(k))}: <code>{escape_html(str(v))}</code>")
+    lines.append("\nTry a model: <code>/tryke &lt;model&gt; &lt;prompt&gt;</code>")
+    if is_owner(uid):
+        lines.append("Add as bot provider: <code>/addmodel &lt;alias&gt; &lt;model&gt;</code>")
+
+    # Build pagination keyboard
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton("« Prev", callback_data=f"mdl:p:{page-1}"))
+    row.append(InlineKeyboardButton(f"{page+1}/{pages}", callback_data="mdl:noop"))
+    if page < pages - 1:
+        row.append(InlineKeyboardButton("Next »", callback_data=f"mdl:p:{page+1}"))
+    rows = [row] if (pages > 1) else []
+    if pages > 2:
+        rows.append([
+            InlineKeyboardButton("⏮ First", callback_data="mdl:p:0"),
+            InlineKeyboardButton("Last ⏭", callback_data=f"mdl:p:{pages-1}"),
+        ])
+    kb = InlineKeyboardMarkup(rows) if rows else None
+    return ("\n".join(lines), kb)
 
 
 async def cmd_tryke(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1598,6 +1634,21 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await force_join_ok(update, context):
             try: await q.edit_message_text("Verified. Tap /start.")
             except Exception: pass
+        return
+
+    # Paginated model listing from /key inspection
+    if data == "mdl:noop":
+        return
+    if data.startswith("mdl:p:"):
+        try:
+            page = int(data.split(":", 2)[2])
+        except Exception:
+            page = 0
+        text, kb = _render_models_page(uid, page=page)
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except Exception:
+            pass
         return
 
     if data == "m:home":
