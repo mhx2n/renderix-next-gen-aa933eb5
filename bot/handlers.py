@@ -1636,6 +1636,21 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception: pass
         return
 
+    # Paginated model listing from /key inspection
+    if data == "mdl:noop":
+        return
+    if data.startswith("mdl:p:"):
+        try:
+            page = int(data.split(":", 2)[2])
+        except Exception:
+            page = 0
+        text, kb = _render_models_page(uid, page=page)
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except Exception:
+            pass
+        return
+
     if data == "m:home":
         await q.edit_message_text("Main menu:", reply_markup=await main_menu_kb(uid)); return
 
