@@ -16,6 +16,7 @@ from telegram.ext import ApplicationBuilder
 
 from bot.config import BOT_TOKEN, PORT
 from bot.db import init_db, log as db_log
+from bot import mongo as _mongo
 from bot.handlers import (
     register_handlers, setup_bot_commands, notify_restart_complete,
     load_custom_providers,
@@ -35,6 +36,10 @@ log = logging.getLogger("main")
 
 async def _amain():
     await init_db()
+    # Connect to MongoDB (if configured) then restore mirrored data into
+    # SQLite. This makes owner edits survive re-deploys and bot updates.
+    await _mongo.init()
+    await _mongo.restore_to_sqlite()
     stop = asyncio.Event()
 
     async def _startup_error(stage: str, exc: Exception):
