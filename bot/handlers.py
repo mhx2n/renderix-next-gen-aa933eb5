@@ -33,6 +33,7 @@ from .providers import (
 from .utils import clean_text, format_ai_answer, chunk_text, escape_html, human_size, safe_user_error, process_metrics, format_duration
 from .keycheck import inspect_key, try_model
 from .tools import textenc as _textenc, language as _language, photo as _photo, shorten as _shorten, stylish as _stylish, translate as _translate, ocr as _ocr
+from .tools import extras as _extras
 
 
 _HISTORY: dict = defaultdict(list)
