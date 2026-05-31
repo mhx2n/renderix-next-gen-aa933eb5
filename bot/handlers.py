@@ -2485,6 +2485,11 @@ USER_COMMANDS = [
     BotCommand("style", "Stylish text (40+ fonts)"),
     BotCommand("tr",    "Translate text"),
     BotCommand("ocr",   "Extract text from image"),
+    BotCommand("info",  "Your account info"),
+    BotCommand("m2t",   "Reply to text → .txt file"),
+    BotCommand("time",  "World time + calendar (e.g. /time bd)"),
+    BotCommand("vnote", "Reply to video → circular note"),
+    BotCommand("top",   "Top 10 users"),
     BotCommand("ping",  "Latency check"),
     BotCommand("help",  "Help (add a topic for AI summary)"),
 ]
