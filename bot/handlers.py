@@ -262,6 +262,19 @@ async def _set_disabled(s: set):
     await db.set_setting("disabled_cmds", ",".join(sorted(s)))
 
 
+# ------- Exhausted providers (red dot on /providers) -------
+async def _get_exhausted_providers() -> set:
+    raw = await db.get_setting("exhausted_providers", "")
+    return {c.strip() for c in raw.split(",") if c.strip()}
+
+
+async def _mark_provider_exhausted(key: str, exhausted: bool):
+    cur = await _get_exhausted_providers()
+    if exhausted: cur.add(key)
+    else: cur.discard(key)
+    await db.set_setting("exhausted_providers", ",".join(sorted(cur)))
+
+
 # ------- UI customization (owner-editable) -------
 DEFAULT_WELCOME = (
     "<b>Welcome, {name}.</b>\n\n"
