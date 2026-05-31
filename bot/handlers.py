@@ -2763,6 +2763,10 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("tryke", cmd_tryke))
     app.add_handler(CommandHandler("dl",    cmd_dl))
     app.add_handler(CommandHandler("dla",   cmd_dla))
+    app.add_handler(CommandHandler("info",  cmd_info))
+    app.add_handler(CommandHandler("m2t",   cmd_m2t))
+    app.add_handler(CommandHandler("time",  cmd_time))
+    app.add_handler(CommandHandler("vnote", cmd_vnote))
 
     for k in list(REGISTRY.keys()):
         app.add_handler(CommandHandler(k, make_provider_handler(k)))
