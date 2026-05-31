@@ -2,6 +2,7 @@ import asyncio
 import html
 import json
 import os
+import tempfile
 import time
 import traceback
 from collections import defaultdict
