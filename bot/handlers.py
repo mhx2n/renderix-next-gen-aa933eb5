@@ -1789,6 +1789,25 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception: pass
         return
 
+    # /time calendar navigation (display-only cells use 'noop')
+    if data == "noop":
+        return
+    if data.startswith("time:"):
+        try:
+            _, code, y, m = data.split(":", 3)
+            built = _extras.build_time_card(code, int(y), int(m))
+        except Exception:
+            built = None
+        if not built:
+            return
+        text, rows = built
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML,
+                                      reply_markup=_time_kb_from_rows(rows))
+        except Exception:
+            pass
+        return
+
     # Paginated model listing from /key inspection
     if data == "mdl:noop":
         return
