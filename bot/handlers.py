@@ -862,6 +862,9 @@ async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
     try:
         answer = await asyncio.wait_for(fn(prompt, history), timeout=180)
         answer_fmt = format_ai_answer(answer) or "No content returned."
+        # Clear any prior exhausted flag on success.
+        try: await _mark_provider_exhausted(provider_key, False)
+        except Exception: pass
         body = f"<b>{escape_html(name)}</b>\n\n{answer_fmt}"
         if placeholder:
             await stream_edit(placeholder, body)
