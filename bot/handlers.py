@@ -886,6 +886,18 @@ async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
     except Exception as e:
         tb = traceback.format_exc(limit=2)
         err_text = str(e)
+        # Detect quota / billing exhaustion and persist a red flag for
+        # /providers display.
+        try:
+            low = err_text.lower()
+            if any(k in low for k in (
+                "insufficient_quota", "quota exceeded", "rate limit",
+                "billing", "credit", "exceeded your current quota",
+                "out of credits", "429",
+            )):
+                await _mark_provider_exhausted(provider_key, True)
+        except Exception:
+            pass
         if provider_key == "pr" and ("Perplexity HTTP 403" in err_text or "HTTP 403" in err_text):
             msg = (
                 "Perplexity is blocking requests from this server right now.\n\n"
