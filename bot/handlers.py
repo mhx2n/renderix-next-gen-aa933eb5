@@ -664,6 +664,153 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
+# /info — user account info
+# ============================================================
+_DC_HINT = {1: "Miami, USA", 2: "Amsterdam, NL", 3: "Miami, USA",
+            4: "Amsterdam, NL", 5: "Singapore"}
+
+
+async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    u = update.effective_user
+    chat = update.effective_chat
+    full_name = " ".join([n for n in [u.first_name, u.last_name] if n]) or "—"
+    username = f"@{u.username}" if u.username else "—"
+    premium = "Yes" if getattr(u, "is_premium", False) else "No"
+    dc_id = None
+    try:
+        photos = await context.bot.get_user_profile_photos(u.id, limit=1)
+        if photos.total_count and photos.photos:
+            dc_id = photos.photos[0][-1].file_id
+            # dc_id from PhotoSize isn't always exposed; fall back below.
+            dc_id = getattr(photos.photos[0][-1], "dc_id", None)
+    except Exception:
+        pass
+    dc_text = f"{dc_id}" + (f"  •  {_DC_HINT.get(dc_id)}" if dc_id in _DC_HINT else "") if dc_id else "—"
+    text = (
+        "👤 <b>User Information</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f" - <b>Full Name:</b> {escape_html(full_name)}\n"
+        f" - <b>User ID:</b> <code>{u.id}</code>\n"
+        f" - <b>Username:</b> {escape_html(username)}\n"
+        f" - <b>Premium User:</b> {premium}\n"
+        f" - <b>Data Center:</b> {escape_html(str(dc_text))}\n"
+        f" - <b>Chat Id:</b> <code>{chat.id if chat else u.id}</code>"
+    )
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+# ============================================================
+# /m2t — text message → .txt file
+# ============================================================
+async def cmd_m2t(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    msg = update.effective_message
+    rep = msg.reply_to_message
+    src_text = ""
+    if rep:
+        src_text = rep.text or rep.caption or ""
+    if not src_text and context.args:
+        src_text = " ".join(context.args)
+    if not src_text.strip():
+        await msg.reply_text("❗ Reply to a text message to convert → file")
+        return
+    data, stats = _extras.build_text_file(src_text)
+    import io as _io
+    bio = _io.BytesIO(data); bio.name = f"message_{int(time.time())%1000000:06d}.txt"
+    caption = (
+        f"📄 <b>{escape_html(bio.name)}</b>\n"
+        f"✅ <b>Messages:</b> {stats['messages']}/1\n"
+        f"📝 <b>Lines:</b> {stats['lines']}\n"
+        f"🔤 <b>Characters:</b> {stats['characters']}"
+    )
+    await msg.reply_document(document=bio, filename=bio.name, caption=caption,
+                             parse_mode=ParseMode.HTML)
+
+
+# ============================================================
+# /time — world clock + calendar
+# ============================================================
+def _time_kb_from_rows(rows: list) -> InlineKeyboardMarkup:
+    kb = []
+    for row in rows:
+        kb.append([InlineKeyboardButton(lbl, callback_data=cb) for lbl, cb in row])
+    return InlineKeyboardMarkup(kb)
+
+
+async def cmd_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    msg = update.effective_message
+    if not context.args:
+        await msg.reply_text(
+            "Please specify a valid country code. Example: <code>/time bd</code>, "
+            "<code>/time us</code>, <code>/time jp</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    code = context.args[0].lower()
+    built = _extras.build_time_card(code)
+    if not built:
+        await msg.reply_text(
+            "Unknown country code. Try one of: <code>bd, in, us, uk, jp, de, fr, ru, cn, sg, ae, au</code> …",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    text, rows = built
+    await msg.reply_text(text, parse_mode=ParseMode.HTML,
+                         reply_markup=_time_kb_from_rows(rows))
+
+
+# ============================================================
+# /vnote — video → circular video note
+# ============================================================
+async def cmd_vnote(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    msg = update.effective_message
+    rep = msg.reply_to_message
+    video_obj = None
+    if rep:
+        video_obj = rep.video or rep.animation or (rep.document if rep.document and (rep.document.mime_type or "").startswith("video/") else None)
+    if not video_obj:
+        await msg.reply_text("❗ Reply to a video with this command")
+        return
+    if not _extras.have_ffmpeg():
+        await msg.reply_text("Server can't process video right now. Please try later.")
+        return
+    placeholder = await msg.reply_text("⏳ Converting to video note…")
+    src_path = None
+    out_path = None
+    try:
+        async with _UPLOAD_SEM:
+            tg_file = await context.bot.get_file(video_obj.file_id)
+            src_fd, src_path = tempfile.mkstemp(prefix="vnote_src_", suffix=".bin")
+            os.close(src_fd)
+            await tg_file.download_to_drive(src_path)
+            out_path = await _extras.make_video_note(src_path)
+            with open(out_path, "rb") as f:
+                await context.bot.send_video_note(
+                    chat_id=msg.chat_id,
+                    video_note=f,
+                    length=384,
+                    reply_to_message_id=rep.message_id,
+                )
+        try: await placeholder.delete()
+        except Exception: pass
+    except Exception as e:
+        await safe_edit(placeholder, "❌ Couldn't convert that video. Try a shorter or smaller clip.")
+        await db.log("ERROR", update.effective_user.id, "vnote", str(e)[:400])
+    finally:
+        for p in (src_path, out_path):
+            if p:
+                try: os.unlink(p)
+                except Exception: pass
+
+
+# ============================================================
 # AI provider call
 # ============================================================
 async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
