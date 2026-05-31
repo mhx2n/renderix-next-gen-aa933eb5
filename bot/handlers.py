@@ -2,6 +2,7 @@ import asyncio
 import html
 import json
 import os
+import tempfile
 import time
 import traceback
 from collections import defaultdict
@@ -33,6 +34,7 @@ from .providers import (
 from .utils import clean_text, format_ai_answer, chunk_text, escape_html, human_size, safe_user_error, process_metrics, format_duration
 from .keycheck import inspect_key, try_model
 from .tools import textenc as _textenc, language as _language, photo as _photo, shorten as _shorten, stylish as _stylish, translate as _translate, ocr as _ocr
+from .tools import extras as _extras
 
 
 _HISTORY: dict = defaultdict(list)
@@ -240,6 +242,10 @@ TOOL_CATALOG: dict = {
         ("dl",    "Video Downloader","Download high-quality playable video from Facebook, Instagram, and TikTok only (max 50MB).\n\n<b>Usage:</b> <code>/dl &lt;url&gt;</code>"),
         ("dla",   "Audio Downloader","Extract audio (mp3) from Facebook, Instagram, and TikTok links only.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
         ("short", "URL Shortener","Shorten any URL.\n\n<b>Usage:</b>\n<code>/short https://example.com/path</code>"),
+        ("info",  "User Information","Show your Telegram account details (name, ID, username, premium, data centre).\n\n<b>Usage:</b> <code>/info</code>  or  <code>.info</code>"),
+        ("m2t",   "Message → File","Convert a text message to a downloadable <code>.txt</code> file.\n\n<b>Usage:</b> Reply to any text message with <code>/m2t</code> or <code>.m2t</code>."),
+        ("time",  "World Time","World clock + monthly calendar for any country.\n\n<b>Usage:</b>\n<code>/time bd</code>, <code>/time us</code>, <code>/time jp</code> …"),
+        ("vnote", "Video → Note","Convert any reply-video into a circular Telegram video note (max 60s).\n\n<b>Usage:</b> Reply to a video with <code>/vnote</code> or <code>.vnote</code>."),
         ("top",   "Top Users",    "See the top 10 most active users of this bot.\n\n<b>Usage:</b> <code>/top</code>"),
         ("ping",  "Ping",         "Bot latency check.\n\n<b>Usage:</b> <code>/ping</code>"),
         ("help",  "Help / About", "AI-summarised help.\n\n<b>Usage:</b>\n<code>/help</code> or <code>/help &lt;topic&gt;</code>"),
@@ -254,6 +260,19 @@ async def _disabled_set() -> set:
 
 async def _set_disabled(s: set):
     await db.set_setting("disabled_cmds", ",".join(sorted(s)))
+
+
+# ------- Exhausted providers (red dot on /providers) -------
+async def _get_exhausted_providers() -> set:
+    raw = await db.get_setting("exhausted_providers", "")
+    return {c.strip() for c in raw.split(",") if c.strip()}
+
+
+async def _mark_provider_exhausted(key: str, exhausted: bool):
+    cur = await _get_exhausted_providers()
+    if exhausted: cur.add(key)
+    else: cur.discard(key)
+    await db.set_setting("exhausted_providers", ",".join(sorted(cur)))
 
 
 # ------- UI customization (owner-editable) -------
@@ -659,6 +678,153 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
+# /info — user account info
+# ============================================================
+_DC_HINT = {1: "Miami, USA", 2: "Amsterdam, NL", 3: "Miami, USA",
+            4: "Amsterdam, NL", 5: "Singapore"}
+
+
+async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    u = update.effective_user
+    chat = update.effective_chat
+    full_name = " ".join([n for n in [u.first_name, u.last_name] if n]) or "—"
+    username = f"@{u.username}" if u.username else "—"
+    premium = "Yes" if getattr(u, "is_premium", False) else "No"
+    dc_id = None
+    try:
+        photos = await context.bot.get_user_profile_photos(u.id, limit=1)
+        if photos.total_count and photos.photos:
+            dc_id = photos.photos[0][-1].file_id
+            # dc_id from PhotoSize isn't always exposed; fall back below.
+            dc_id = getattr(photos.photos[0][-1], "dc_id", None)
+    except Exception:
+        pass
+    dc_text = f"{dc_id}" + (f"  •  {_DC_HINT.get(dc_id)}" if dc_id in _DC_HINT else "") if dc_id else "—"
+    text = (
+        "👤 <b>User Information</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f" - <b>Full Name:</b> {escape_html(full_name)}\n"
+        f" - <b>User ID:</b> <code>{u.id}</code>\n"
+        f" - <b>Username:</b> {escape_html(username)}\n"
+        f" - <b>Premium User:</b> {premium}\n"
+        f" - <b>Data Center:</b> {escape_html(str(dc_text))}\n"
+        f" - <b>Chat Id:</b> <code>{chat.id if chat else u.id}</code>"
+    )
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+# ============================================================
+# /m2t — text message → .txt file
+# ============================================================
+async def cmd_m2t(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    msg = update.effective_message
+    rep = msg.reply_to_message
+    src_text = ""
+    if rep:
+        src_text = rep.text or rep.caption or ""
+    if not src_text and context.args:
+        src_text = " ".join(context.args)
+    if not src_text.strip():
+        await msg.reply_text("❗ Reply to a text message to convert → file")
+        return
+    data, stats = _extras.build_text_file(src_text)
+    import io as _io
+    bio = _io.BytesIO(data); bio.name = f"message_{int(time.time())%1000000:06d}.txt"
+    caption = (
+        f"📄 <b>{escape_html(bio.name)}</b>\n"
+        f"✅ <b>Messages:</b> {stats['messages']}/1\n"
+        f"📝 <b>Lines:</b> {stats['lines']}\n"
+        f"🔤 <b>Characters:</b> {stats['characters']}"
+    )
+    await msg.reply_document(document=bio, filename=bio.name, caption=caption,
+                             parse_mode=ParseMode.HTML)
+
+
+# ============================================================
+# /time — world clock + calendar
+# ============================================================
+def _time_kb_from_rows(rows: list) -> InlineKeyboardMarkup:
+    kb = []
+    for row in rows:
+        kb.append([InlineKeyboardButton(lbl, callback_data=cb) for lbl, cb in row])
+    return InlineKeyboardMarkup(kb)
+
+
+async def cmd_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    msg = update.effective_message
+    if not context.args:
+        await msg.reply_text(
+            "Please specify a valid country code. Example: <code>/time bd</code>, "
+            "<code>/time us</code>, <code>/time jp</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    code = context.args[0].lower()
+    built = _extras.build_time_card(code)
+    if not built:
+        await msg.reply_text(
+            "Unknown country code. Try one of: <code>bd, in, us, uk, jp, de, fr, ru, cn, sg, ae, au</code> …",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    text, rows = built
+    await msg.reply_text(text, parse_mode=ParseMode.HTML,
+                         reply_markup=_time_kb_from_rows(rows))
+
+
+# ============================================================
+# /vnote — video → circular video note
+# ============================================================
+async def cmd_vnote(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    msg = update.effective_message
+    rep = msg.reply_to_message
+    video_obj = None
+    if rep:
+        video_obj = rep.video or rep.animation or (rep.document if rep.document and (rep.document.mime_type or "").startswith("video/") else None)
+    if not video_obj:
+        await msg.reply_text("❗ Reply to a video with this command")
+        return
+    if not _extras.have_ffmpeg():
+        await msg.reply_text("Server can't process video right now. Please try later.")
+        return
+    placeholder = await msg.reply_text("⏳ Converting to video note…")
+    src_path = None
+    out_path = None
+    try:
+        async with _UPLOAD_SEM:
+            tg_file = await context.bot.get_file(video_obj.file_id)
+            src_fd, src_path = tempfile.mkstemp(prefix="vnote_src_", suffix=".bin")
+            os.close(src_fd)
+            await tg_file.download_to_drive(src_path)
+            out_path = await _extras.make_video_note(src_path)
+            with open(out_path, "rb") as f:
+                await context.bot.send_video_note(
+                    chat_id=msg.chat_id,
+                    video_note=f,
+                    length=384,
+                    reply_to_message_id=rep.message_id,
+                )
+        try: await placeholder.delete()
+        except Exception: pass
+    except Exception as e:
+        await safe_edit(placeholder, "❌ Couldn't convert that video. Try a shorter or smaller clip.")
+        await db.log("ERROR", update.effective_user.id, "vnote", str(e)[:400])
+    finally:
+        for p in (src_path, out_path):
+            if p:
+                try: os.unlink(p)
+                except Exception: pass
+
+
+# ============================================================
 # AI provider call
 # ============================================================
 async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -709,6 +875,9 @@ async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
     try:
         answer = await asyncio.wait_for(fn(prompt, history), timeout=180)
         answer_fmt = format_ai_answer(answer) or "No content returned."
+        # Clear any prior exhausted flag on success.
+        try: await _mark_provider_exhausted(provider_key, False)
+        except Exception: pass
         body = f"<b>{escape_html(name)}</b>\n\n{answer_fmt}"
         if placeholder:
             await stream_edit(placeholder, body)
@@ -733,6 +902,18 @@ async def _call_provider(update: Update, context: ContextTypes.DEFAULT_TYPE,
     except Exception as e:
         tb = traceback.format_exc(limit=2)
         err_text = str(e)
+        # Detect quota / billing exhaustion and persist a red flag for
+        # /providers display.
+        try:
+            low = err_text.lower()
+            if any(k in low for k in (
+                "insufficient_quota", "quota exceeded", "rate limit",
+                "billing", "credit", "exceeded your current quota",
+                "out of credits", "429",
+            )):
+                await _mark_provider_exhausted(provider_key, True)
+        except Exception:
+            pass
         if provider_key == "pr" and ("Perplexity HTTP 403" in err_text or "HTTP 403" in err_text):
             msg = (
                 "Perplexity is blocking requests from this server right now.\n\n"
@@ -1385,9 +1566,14 @@ async def cmd_delprovider(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    exhausted = await _get_exhausted_providers()
     lines = ["<b>Available providers</b>", ""]
     for key, (name, _) in REGISTRY.items():
-        lines.append(f"• <b>{escape_html(name)}</b> — <code>/{key}</code> or <code>.{key}</code>")
+        flag = " 🔴" if key in exhausted else ""
+        lines.append(f"• <b>{escape_html(name)}</b>{flag} — <code>/{key}</code> or <code>.{key}</code>")
+    if exhausted:
+        lines.append("")
+        lines.append("🔴 = quota / credits exhausted")
     await send_md(update.effective_message, "\n".join(lines))
 
 
@@ -1396,7 +1582,7 @@ _RESERVED_CMDS = {
     "users","setchannel","ban","unban","announce","cancel","live","speak","grant",
     "revoke","restart","mkey","mlimit","addmodel","addprovider","delprovider",
     "providers","en","de","text","wc","spell","gra","syn","prn","bg","enh","res",
-    "short","style","tr","ocr",
+    "short","style","tr","ocr","info","m2t","time","vnote","top",
 }
 
 _PROVIDER_BASE_URLS = {
@@ -1634,6 +1820,25 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await force_join_ok(update, context):
             try: await q.edit_message_text("Verified. Tap /start.")
             except Exception: pass
+        return
+
+    # /time calendar navigation (display-only cells use 'noop')
+    if data == "noop":
+        return
+    if data.startswith("time:"):
+        try:
+            _, code, y, m = data.split(":", 3)
+            built = _extras.build_time_card(code, int(y), int(m))
+        except Exception:
+            built = None
+        if not built:
+            return
+        text, rows = built
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML,
+                                      reply_markup=_time_kb_from_rows(rows))
+        except Exception:
+            pass
         return
 
     # Paginated model listing from /key inspection
@@ -2267,6 +2472,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "start": cmd_start, "help": cmd_help, "menu": cmd_menu,
             "ping": cmd_ping, "key": cmd_key, "tryke": cmd_tryke, "dl": cmd_dl,
             "top": cmd_top,
+            "info": cmd_info, "m2t": cmd_m2t, "time": cmd_time, "vnote": cmd_vnote,
         }
         if cmd in alias:
             context.args = rest.split() if rest else []
@@ -2331,6 +2537,11 @@ USER_COMMANDS = [
     BotCommand("style", "Stylish text (40+ fonts)"),
     BotCommand("tr",    "Translate text"),
     BotCommand("ocr",   "Extract text from image"),
+    BotCommand("info",  "Your account info"),
+    BotCommand("m2t",   "Reply to text → .txt file"),
+    BotCommand("time",  "World time + calendar (e.g. /time bd)"),
+    BotCommand("vnote", "Reply to video → circular note"),
+    BotCommand("top",   "Top 10 users"),
     BotCommand("ping",  "Latency check"),
     BotCommand("help",  "Help (add a topic for AI summary)"),
 ]
@@ -2610,6 +2821,10 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("tryke", cmd_tryke))
     app.add_handler(CommandHandler("dl",    cmd_dl))
     app.add_handler(CommandHandler("dla",   cmd_dla))
+    app.add_handler(CommandHandler("info",  cmd_info))
+    app.add_handler(CommandHandler("m2t",   cmd_m2t))
+    app.add_handler(CommandHandler("time",  cmd_time))
+    app.add_handler(CommandHandler("vnote", cmd_vnote))
 
     for k in list(REGISTRY.keys()):
         app.add_handler(CommandHandler(k, make_provider_handler(k)))
