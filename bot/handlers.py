@@ -1553,9 +1553,14 @@ async def cmd_delprovider(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    exhausted = await _get_exhausted_providers()
     lines = ["<b>Available providers</b>", ""]
     for key, (name, _) in REGISTRY.items():
-        lines.append(f"• <b>{escape_html(name)}</b> — <code>/{key}</code> or <code>.{key}</code>")
+        flag = " 🔴" if key in exhausted else ""
+        lines.append(f"• <b>{escape_html(name)}</b>{flag} — <code>/{key}</code> or <code>.{key}</code>")
+    if exhausted:
+        lines.append("")
+        lines.append("🔴 = quota / credits exhausted")
     await send_md(update.effective_message, "\n".join(lines))
 
 
