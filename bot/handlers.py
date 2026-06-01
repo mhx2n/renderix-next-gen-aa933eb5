@@ -1687,13 +1687,42 @@ async def cmd_delprovider(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     exhausted = await _get_exhausted_providers()
-    lines = ["<b>Available providers</b>", ""]
+    try:
+        customs = await db.list_custom_providers(enabled_only=False)
+    except Exception:
+        customs = []
+    custom_meta = {row[0]: row for row in customs}  # cmd -> (cmd,name,base_url,api_key,model,enabled)
+
+    builtin_lines, custom_lines = [], []
     for key, (name, _) in REGISTRY.items():
-        flag = " 🔴" if key in exhausted else ""
-        lines.append(f"• <b>{escape_html(name)}</b>{flag} — <code>/{key}</code> or <code>.{key}</code>")
-    if exhausted:
-        lines.append("")
-        lines.append("🔴 = quota / credits exhausted")
+        is_exh = key in exhausted
+        dot = "🔴" if is_exh else "🟢"
+        meta = custom_meta.get(key)
+        if meta:
+            _, mname, base, _api, model, enabled = meta
+            status = "" if enabled else "  <i>(disabled)</i>"
+            tail = " <i>quota exhausted</i>" if is_exh else ""
+            custom_lines.append(
+                f"{dot} <b>{escape_html(mname or name)}</b> — <code>/{key}</code>{status}\n"
+                f"     <i>model:</i> <code>{escape_html(model or '—')}</code>{tail}"
+            )
+        else:
+            tail = " <i>quota exhausted</i>" if is_exh else ""
+            builtin_lines.append(
+                f"{dot} <b>{escape_html(name)}</b> — <code>/{key}</code> or <code>.{key}</code>{tail}"
+            )
+
+    lines = ["<b>Active providers</b>", ""]
+    if builtin_lines:
+        lines.append("<b>Built-in</b>")
+        lines.extend(builtin_lines)
+    if custom_lines:
+        if builtin_lines:
+            lines.append("")
+        lines.append("<b>Custom (added via /addmodel)</b>")
+        lines.extend(custom_lines)
+    lines.append("")
+    lines.append("🟢 = healthy   🔴 = quota / credits exhausted (auto-clears on next successful call)")
     await send_md(update.effective_message, "\n".join(lines))
 
 
