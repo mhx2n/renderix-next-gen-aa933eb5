@@ -34,7 +34,7 @@ from .providers import (
 from .utils import clean_text, format_ai_answer, chunk_text, escape_html, human_size, safe_user_error, process_metrics, format_duration
 from .keycheck import inspect_key, try_model
 from .tools import textenc as _textenc, language as _language, photo as _photo, shorten as _shorten, stylish as _stylish, translate as _translate, ocr as _ocr
-from .tools import extras as _extras
+from .tools import extras as _extras, m2t as _m2t, convert as _cv
 
 
 _HISTORY: dict = defaultdict(list)
@@ -243,9 +243,10 @@ TOOL_CATALOG: dict = {
         ("dla",   "Audio Downloader","Extract audio (mp3) from Facebook, Instagram, and TikTok links only.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
         ("short", "URL Shortener","Shorten any URL.\n\n<b>Usage:</b>\n<code>/short https://example.com/path</code>"),
         ("info",  "User Information","Show your Telegram account details (name, ID, username, premium, data centre).\n\n<b>Usage:</b> <code>/info</code>  or  <code>.info</code>"),
-        ("m2t",   "Message → File","Convert a text message to a downloadable <code>.txt</code> file.\n\n<b>Usage:</b> Reply to any text message with <code>/m2t</code> or <code>.m2t</code>."),
+        ("m2t",   "Message → File","Convert a text message to a downloadable file in 70+ formats (txt, md, json, py, js, sql, docx, …).\n\n<b>Usage:</b>\n<code>/m2t</code> → open the format menu (paginated)\n<code>/m2t &lt;ext&gt;</code> while replying to a text message\n<code>/m2t &lt;ext&gt; your text here</code>"),
         ("time",  "World Time","World clock + monthly calendar for any country.\n\n<b>Usage:</b>\n<code>/time bd</code>, <code>/time us</code>, <code>/time jp</code> …"),
         ("vnote", "Video → Note","Convert any reply-video into a circular Telegram video note (max 60s).\n\n<b>Usage:</b> Reply to a video with <code>/vnote</code> or <code>.vnote</code>."),
+        ("convert","Universal Converter","Number systems, codes, data encoding, networking, units, hashing — with AI step-by-step explanation.\n\n<b>Usage:</b>\n<code>/convert</code> → open the format menu (paginated)\n<code>/convert &lt;type&gt; &lt;value&gt;</code> → run directly\nReply to a message with <code>/convert &lt;type&gt;</code>."),
         ("top",   "Top Users",    "See the top 10 most active users of this bot.\n\n<b>Usage:</b> <code>/top</code>"),
         ("ping",  "Ping",         "Bot latency check.\n\n<b>Usage:</b> <code>/ping</code>"),
         ("help",  "Help / About", "AI-summarised help.\n\n<b>Usage:</b>\n<code>/help</code> or <code>/help &lt;topic&gt;</code>"),
@@ -716,32 +717,151 @@ async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# /m2t — text message → .txt file
+# /m2t — text message → file (70+ formats, paginated menu)
 # ============================================================
+def _kb_from_rows(rows: list) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(lbl, callback_data=cb) for lbl, cb in row]
+        for row in rows
+    ])
+
+
+async def _send_m2t_menu(target_msg, page: int = 0, edit: bool = False):
+    text, rows = _m2t.build_page(page)
+    kb = _kb_from_rows(rows)
+    if edit:
+        try:
+            await target_msg.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            return
+        except Exception:
+            pass
+    await target_msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
 async def cmd_m2t(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_ok(update, context):
         return
     msg = update.effective_message
     rep = msg.reply_to_message
-    src_text = ""
-    if rep:
+    args = list(context.args or [])
+
+    # Resolve extension (first arg if it looks like one).
+    ext = None
+    if args and _m2t.is_supported(args[0]):
+        ext = args.pop(0).lower().lstrip(".")
+
+    # Source text: prefer remaining args, else replied message.
+    src_text = " ".join(args).strip()
+    if not src_text and rep:
         src_text = rep.text or rep.caption or ""
-    if not src_text and context.args:
-        src_text = " ".join(context.args)
-    if not src_text.strip():
-        await msg.reply_text("❗ Reply to a text message to convert → file")
+
+    # No extension AND no replied text → menu.
+    if ext is None and not src_text:
+        await _send_m2t_menu(msg, page=0)
         return
-    data, stats = _extras.build_text_file(src_text)
+
+    # Extension known but nothing to convert → menu hint.
+    if ext and not src_text:
+        await msg.reply_text(
+            f"Reply to a text message with <code>/m2t {ext}</code>, "
+            f"or send <code>/m2t {ext} your text here</code>.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if not ext:
+        ext = "txt"
+
     import io as _io
-    bio = _io.BytesIO(data); bio.name = f"message_{int(time.time())%1000000:06d}.txt"
+    data, filename, stats = _m2t.build_file(ext, src_text)
+    bio = _io.BytesIO(data); bio.name = filename
     caption = (
-        f"📄 <b>{escape_html(bio.name)}</b>\n"
-        f"✅ <b>Messages:</b> {stats['messages']}/1\n"
+        f"📄 <b>{escape_html(filename)}</b>\n"
+        f"✅ <b>Format:</b> .{stats['ext']}\n"
         f"📝 <b>Lines:</b> {stats['lines']}\n"
-        f"🔤 <b>Characters:</b> {stats['characters']}"
+        f"🔤 <b>Characters:</b> {stats['characters']}\n"
+        f"💾 <b>Size:</b> {human_size(stats['bytes'])}"
     )
-    await msg.reply_document(document=bio, filename=bio.name, caption=caption,
+    await msg.reply_document(document=bio, filename=filename, caption=caption,
                              parse_mode=ParseMode.HTML)
+
+
+# ============================================================
+# /convert — universal converter (number systems, codes, data, units…)
+# ============================================================
+async def _send_convert_menu(target_msg, page: int = 0, edit: bool = False):
+    text, rows = _cv.build_page(page)
+    kb = _kb_from_rows(rows)
+    if edit:
+        try:
+            await target_msg.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            return
+        except Exception:
+            pass
+    await target_msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    msg = update.effective_message
+    rep = msg.reply_to_message
+    args = list(context.args or [])
+
+    if not args:
+        await _send_convert_menu(msg, page=0)
+        return
+
+    slug = args.pop(0).lower()
+    if not _cv.is_supported(slug):
+        await msg.reply_text(
+            f"Unknown conversion type <code>{escape_html(slug)}</code>. "
+            f"Send <code>/convert</code> to see the full list.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    value = " ".join(args).strip()
+    if not value and rep:
+        value = (rep.text or rep.caption or "").strip()
+    if not value:
+        await msg.reply_text(_cv.usage_for(slug), parse_mode=ParseMode.HTML)
+        return
+
+    result, ai_prompt = _cv.do_convert(slug, value)
+    if result is None:
+        # Fully unknown — let AI explain. (Shouldn't reach here because of
+        # is_supported guard, but kept for safety.)
+        result = "—"
+        ai_prompt = (
+            f"Perform the conversion '{slug}' on input `{value}`. "
+            f"Reply with 4-6 short lines explaining the steps. End with "
+            f"`Result: <answer>`."
+        )
+
+    header = (
+        f"<b>{escape_html(_cv.usage_for(slug).splitlines()[0])}</b>\n"
+        f"Input: <code>{escape_html(value)}</code>\n"
+        f"Result: <code>{escape_html(str(result))}</code>"
+    )
+    placeholder = await msg.reply_text(header + "\n\n<i>Generating explanation…</i>",
+                                       parse_mode=ParseMode.HTML)
+
+    # Best-effort AI explanation via Gemini provider, if available.
+    explanation = ""
+    try:
+        _, gfn = REGISTRY.get("g", (None, None))
+        if gfn and ai_prompt:
+            ai = await asyncio.wait_for(gfn(ai_prompt, []), timeout=25)
+            explanation = clean_text((ai or "").strip())[:1500]
+    except Exception:
+        explanation = ""
+
+    if explanation:
+        final = header + "\n\n<b>How it works:</b>\n" + escape_html(explanation)
+    else:
+        final = header
+    await safe_edit(placeholder, final)
 
 
 # ============================================================
@@ -1567,13 +1687,42 @@ async def cmd_delprovider(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     exhausted = await _get_exhausted_providers()
-    lines = ["<b>Available providers</b>", ""]
+    try:
+        customs = await db.list_custom_providers(enabled_only=False)
+    except Exception:
+        customs = []
+    custom_meta = {row[0]: row for row in customs}  # cmd -> (cmd,name,base_url,api_key,model,enabled)
+
+    builtin_lines, custom_lines = [], []
     for key, (name, _) in REGISTRY.items():
-        flag = " 🔴" if key in exhausted else ""
-        lines.append(f"• <b>{escape_html(name)}</b>{flag} — <code>/{key}</code> or <code>.{key}</code>")
-    if exhausted:
-        lines.append("")
-        lines.append("🔴 = quota / credits exhausted")
+        is_exh = key in exhausted
+        dot = "🔴" if is_exh else "🟢"
+        meta = custom_meta.get(key)
+        if meta:
+            _, mname, base, _api, model, enabled = meta
+            status = "" if enabled else "  <i>(disabled)</i>"
+            tail = " <i>quota exhausted</i>" if is_exh else ""
+            custom_lines.append(
+                f"{dot} <b>{escape_html(mname or name)}</b> — <code>/{key}</code>{status}\n"
+                f"     <i>model:</i> <code>{escape_html(model or '—')}</code>{tail}"
+            )
+        else:
+            tail = " <i>quota exhausted</i>" if is_exh else ""
+            builtin_lines.append(
+                f"{dot} <b>{escape_html(name)}</b> — <code>/{key}</code> or <code>.{key}</code>{tail}"
+            )
+
+    lines = ["<b>Active providers</b>", ""]
+    if builtin_lines:
+        lines.append("<b>Built-in</b>")
+        lines.extend(builtin_lines)
+    if custom_lines:
+        if builtin_lines:
+            lines.append("")
+        lines.append("<b>Custom (added via /addmodel)</b>")
+        lines.extend(custom_lines)
+    lines.append("")
+    lines.append("🟢 = healthy   🔴 = quota / credits exhausted (auto-clears on next successful call)")
     await send_md(update.effective_message, "\n".join(lines))
 
 
@@ -1582,7 +1731,7 @@ _RESERVED_CMDS = {
     "users","setchannel","ban","unban","announce","cancel","live","speak","grant",
     "revoke","restart","mkey","mlimit","addmodel","addprovider","delprovider",
     "providers","en","de","text","wc","spell","gra","syn","prn","bg","enh","res",
-    "short","style","tr","ocr","info","m2t","time","vnote","top",
+    "short","style","tr","ocr","info","m2t","time","vnote","top","convert",
 }
 
 _PROVIDER_BASE_URLS = {
@@ -1852,6 +2001,64 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text, kb = _render_models_page(uid, page=page)
         try:
             await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except Exception:
+            pass
+        return
+
+    # /m2t — paginated format menu
+    if data == "m2t:noop":
+        return
+    if data.startswith("m2t:p:"):
+        try:
+            page = int(data.split(":", 2)[2])
+        except Exception:
+            page = 0
+        text, rows = _m2t.build_page(page)
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML,
+                                      reply_markup=_kb_from_rows(rows))
+        except Exception:
+            pass
+        return
+    if data.startswith("m2t:f:"):
+        ext = data.split(":", 2)[2]
+        try:
+            await q.edit_message_text(
+                _m2t.format_usage(ext),
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="m2t:p:0")
+                ]]),
+            )
+        except Exception:
+            pass
+        return
+
+    # /convert — paginated catalogue
+    if data == "cv:noop":
+        return
+    if data.startswith("cv:p:"):
+        try:
+            page = int(data.split(":", 2)[2])
+        except Exception:
+            page = 0
+        text, rows = _cv.build_page(page)
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML,
+                                      reply_markup=_kb_from_rows(rows))
+        except Exception:
+            pass
+        return
+    if data.startswith("cv:f:"):
+        slug = data.split(":", 2)[2]
+        try:
+            await q.edit_message_text(
+                _cv.usage_for(slug),
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="cv:p:0")
+                ]]),
+            )
         except Exception:
             pass
         return
@@ -2473,6 +2680,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ping": cmd_ping, "key": cmd_key, "tryke": cmd_tryke, "dl": cmd_dl,
             "top": cmd_top,
             "info": cmd_info, "m2t": cmd_m2t, "time": cmd_time, "vnote": cmd_vnote,
+            "convert": cmd_convert,
         }
         if cmd in alias:
             context.args = rest.split() if rest else []
@@ -2541,6 +2749,7 @@ USER_COMMANDS = [
     BotCommand("m2t",   "Reply to text → .txt file"),
     BotCommand("time",  "World time + calendar (e.g. /time bd)"),
     BotCommand("vnote", "Reply to video → circular note"),
+    BotCommand("convert","Universal converter (bin/hex/units/…)"),
     BotCommand("top",   "Top 10 users"),
     BotCommand("ping",  "Latency check"),
     BotCommand("help",  "Help (add a topic for AI summary)"),
@@ -2825,6 +3034,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("m2t",   cmd_m2t))
     app.add_handler(CommandHandler("time",  cmd_time))
     app.add_handler(CommandHandler("vnote", cmd_vnote))
+    app.add_handler(CommandHandler("convert", cmd_convert))
 
     for k in list(REGISTRY.keys()):
         app.add_handler(CommandHandler(k, make_provider_handler(k)))
