@@ -2622,6 +2622,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ping": cmd_ping, "key": cmd_key, "tryke": cmd_tryke, "dl": cmd_dl,
             "top": cmd_top,
             "info": cmd_info, "m2t": cmd_m2t, "time": cmd_time, "vnote": cmd_vnote,
+            "convert": cmd_convert,
         }
         if cmd in alias:
             context.args = rest.split() if rest else []
