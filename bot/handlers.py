@@ -2691,6 +2691,7 @@ USER_COMMANDS = [
     BotCommand("m2t",   "Reply to text → .txt file"),
     BotCommand("time",  "World time + calendar (e.g. /time bd)"),
     BotCommand("vnote", "Reply to video → circular note"),
+    BotCommand("convert","Universal converter (bin/hex/units/…)"),
     BotCommand("top",   "Top 10 users"),
     BotCommand("ping",  "Latency check"),
     BotCommand("help",  "Help (add a topic for AI summary)"),
