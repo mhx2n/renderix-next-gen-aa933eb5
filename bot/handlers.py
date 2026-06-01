@@ -2976,6 +2976,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("m2t",   cmd_m2t))
     app.add_handler(CommandHandler("time",  cmd_time))
     app.add_handler(CommandHandler("vnote", cmd_vnote))
+    app.add_handler(CommandHandler("convert", cmd_convert))
 
     for k in list(REGISTRY.keys()):
         app.add_handler(CommandHandler(k, make_provider_handler(k)))
