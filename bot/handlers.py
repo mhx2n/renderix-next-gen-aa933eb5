@@ -717,32 +717,151 @@ async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# /m2t — text message → .txt file
+# /m2t — text message → file (70+ formats, paginated menu)
 # ============================================================
+def _kb_from_rows(rows: list) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(lbl, callback_data=cb) for lbl, cb in row]
+        for row in rows
+    ])
+
+
+async def _send_m2t_menu(target_msg, page: int = 0, edit: bool = False):
+    text, rows = _m2t.build_page(page)
+    kb = _kb_from_rows(rows)
+    if edit:
+        try:
+            await target_msg.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            return
+        except Exception:
+            pass
+    await target_msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
 async def cmd_m2t(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_ok(update, context):
         return
     msg = update.effective_message
     rep = msg.reply_to_message
-    src_text = ""
-    if rep:
+    args = list(context.args or [])
+
+    # Resolve extension (first arg if it looks like one).
+    ext = None
+    if args and _m2t.is_supported(args[0]):
+        ext = args.pop(0).lower().lstrip(".")
+
+    # Source text: prefer remaining args, else replied message.
+    src_text = " ".join(args).strip()
+    if not src_text and rep:
         src_text = rep.text or rep.caption or ""
-    if not src_text and context.args:
-        src_text = " ".join(context.args)
-    if not src_text.strip():
-        await msg.reply_text("❗ Reply to a text message to convert → file")
+
+    # No extension AND no replied text → menu.
+    if ext is None and not src_text:
+        await _send_m2t_menu(msg, page=0)
         return
-    data, stats = _extras.build_text_file(src_text)
+
+    # Extension known but nothing to convert → menu hint.
+    if ext and not src_text:
+        await msg.reply_text(
+            f"Reply to a text message with <code>/m2t {ext}</code>, "
+            f"or send <code>/m2t {ext} your text here</code>.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if not ext:
+        ext = "txt"
+
     import io as _io
-    bio = _io.BytesIO(data); bio.name = f"message_{int(time.time())%1000000:06d}.txt"
+    data, filename, stats = _m2t.build_file(ext, src_text)
+    bio = _io.BytesIO(data); bio.name = filename
     caption = (
-        f"📄 <b>{escape_html(bio.name)}</b>\n"
-        f"✅ <b>Messages:</b> {stats['messages']}/1\n"
+        f"📄 <b>{escape_html(filename)}</b>\n"
+        f"✅ <b>Format:</b> .{stats['ext']}\n"
         f"📝 <b>Lines:</b> {stats['lines']}\n"
-        f"🔤 <b>Characters:</b> {stats['characters']}"
+        f"🔤 <b>Characters:</b> {stats['characters']}\n"
+        f"💾 <b>Size:</b> {human_size(stats['bytes'])}"
     )
-    await msg.reply_document(document=bio, filename=bio.name, caption=caption,
+    await msg.reply_document(document=bio, filename=filename, caption=caption,
                              parse_mode=ParseMode.HTML)
+
+
+# ============================================================
+# /convert — universal converter (number systems, codes, data, units…)
+# ============================================================
+async def _send_convert_menu(target_msg, page: int = 0, edit: bool = False):
+    text, rows = _cv.build_page(page)
+    kb = _kb_from_rows(rows)
+    if edit:
+        try:
+            await target_msg.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            return
+        except Exception:
+            pass
+    await target_msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_ok(update, context):
+        return
+    msg = update.effective_message
+    rep = msg.reply_to_message
+    args = list(context.args or [])
+
+    if not args:
+        await _send_convert_menu(msg, page=0)
+        return
+
+    slug = args.pop(0).lower()
+    if not _cv.is_supported(slug):
+        await msg.reply_text(
+            f"Unknown conversion type <code>{escape_html(slug)}</code>. "
+            f"Send <code>/convert</code> to see the full list.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    value = " ".join(args).strip()
+    if not value and rep:
+        value = (rep.text or rep.caption or "").strip()
+    if not value:
+        await msg.reply_text(_cv.usage_for(slug), parse_mode=ParseMode.HTML)
+        return
+
+    result, ai_prompt = _cv.do_convert(slug, value)
+    if result is None:
+        # Fully unknown — let AI explain. (Shouldn't reach here because of
+        # is_supported guard, but kept for safety.)
+        result = "—"
+        ai_prompt = (
+            f"Perform the conversion '{slug}' on input `{value}`. "
+            f"Reply with 4-6 short lines explaining the steps. End with "
+            f"`Result: <answer>`."
+        )
+
+    header = (
+        f"<b>{escape_html(_cv.usage_for(slug).splitlines()[0])}</b>\n"
+        f"Input: <code>{escape_html(value)}</code>\n"
+        f"Result: <code>{escape_html(str(result))}</code>"
+    )
+    placeholder = await msg.reply_text(header + "\n\n<i>Generating explanation…</i>",
+                                       parse_mode=ParseMode.HTML)
+
+    # Best-effort AI explanation via Gemini provider, if available.
+    explanation = ""
+    try:
+        _, gfn = REGISTRY.get("g", (None, None))
+        if gfn and ai_prompt:
+            ai = await asyncio.wait_for(gfn(ai_prompt, []), timeout=25)
+            explanation = clean_text((ai or "").strip())[:1500]
+    except Exception:
+        explanation = ""
+
+    if explanation:
+        final = header + "\n\n<b>How it works:</b>\n" + escape_html(explanation)
+    else:
+        final = header
+    await safe_edit(placeholder, final)
 
 
 # ============================================================
