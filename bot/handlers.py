@@ -1731,7 +1731,7 @@ _RESERVED_CMDS = {
     "users","setchannel","ban","unban","announce","cancel","live","speak","grant",
     "revoke","restart","mkey","mlimit","addmodel","addprovider","delprovider",
     "providers","en","de","text","wc","spell","gra","syn","prn","bg","enh","res",
-    "short","style","tr","ocr","info","m2t","time","vnote","top",
+    "short","style","tr","ocr","info","m2t","time","vnote","top","convert",
 }
 
 _PROVIDER_BASE_URLS = {
