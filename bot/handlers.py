@@ -2005,6 +2005,64 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return
 
+    # /m2t — paginated format menu
+    if data == "m2t:noop":
+        return
+    if data.startswith("m2t:p:"):
+        try:
+            page = int(data.split(":", 2)[2])
+        except Exception:
+            page = 0
+        text, rows = _m2t.build_page(page)
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML,
+                                      reply_markup=_kb_from_rows(rows))
+        except Exception:
+            pass
+        return
+    if data.startswith("m2t:f:"):
+        ext = data.split(":", 2)[2]
+        try:
+            await q.edit_message_text(
+                _m2t.format_usage(ext),
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="m2t:p:0")
+                ]]),
+            )
+        except Exception:
+            pass
+        return
+
+    # /convert — paginated catalogue
+    if data == "cv:noop":
+        return
+    if data.startswith("cv:p:"):
+        try:
+            page = int(data.split(":", 2)[2])
+        except Exception:
+            page = 0
+        text, rows = _cv.build_page(page)
+        try:
+            await q.edit_message_text(text, parse_mode=ParseMode.HTML,
+                                      reply_markup=_kb_from_rows(rows))
+        except Exception:
+            pass
+        return
+    if data.startswith("cv:f:"):
+        slug = data.split(":", 2)[2]
+        try:
+            await q.edit_message_text(
+                _cv.usage_for(slug),
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Back", callback_data="cv:p:0")
+                ]]),
+            )
+        except Exception:
+            pass
+        return
+
     if data == "m:home":
         await q.edit_message_text("Main menu:", reply_markup=await main_menu_kb(uid)); return
 
