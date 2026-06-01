@@ -243,7 +243,7 @@ TOOL_CATALOG: dict = {
         ("dla",   "Audio Downloader","Extract audio (mp3) from Facebook, Instagram, and TikTok links only.\n\n<b>Usage:</b> <code>/dla &lt;url&gt;</code>"),
         ("short", "URL Shortener","Shorten any URL.\n\n<b>Usage:</b>\n<code>/short https://example.com/path</code>"),
         ("info",  "User Information","Show your Telegram account details (name, ID, username, premium, data centre).\n\n<b>Usage:</b> <code>/info</code>  or  <code>.info</code>"),
-        ("m2t",   "Message → File","Convert a text message to a downloadable <code>.txt</code> file.\n\n<b>Usage:</b> Reply to any text message with <code>/m2t</code> or <code>.m2t</code>."),
+        ("m2t",   "Message → File","Convert a text message to a downloadable file in 70+ formats (txt, md, json, py, js, sql, docx, …).\n\n<b>Usage:</b>\n<code>/m2t</code> → open the format menu (paginated)\n<code>/m2t &lt;ext&gt;</code> while replying to a text message\n<code>/m2t &lt;ext&gt; your text here</code>"),
         ("time",  "World Time","World clock + monthly calendar for any country.\n\n<b>Usage:</b>\n<code>/time bd</code>, <code>/time us</code>, <code>/time jp</code> …"),
         ("vnote", "Video → Note","Convert any reply-video into a circular Telegram video note (max 60s).\n\n<b>Usage:</b> Reply to a video with <code>/vnote</code> or <code>.vnote</code>."),
         ("convert","Universal Converter","Number systems, codes, data encoding, networking, units, hashing — with AI step-by-step explanation.\n\n<b>Usage:</b>\n<code>/convert</code> → open the format menu (paginated)\n<code>/convert &lt;type&gt; &lt;value&gt;</code> → run directly\nReply to a message with <code>/convert &lt;type&gt;</code>."),
