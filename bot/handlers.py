@@ -839,8 +839,10 @@ async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"`Result: <answer>`."
         )
 
+    # usage_for() already returns valid HTML; use its title line as-is.
+    title_line = _cv.usage_for(slug).splitlines()[0]
     header = (
-        f"<b>{escape_html(_cv.usage_for(slug).splitlines()[0])}</b>\n"
+        f"{title_line}\n"
         f"Input: <code>{escape_html(value)}</code>\n"
         f"Result: <code>{escape_html(str(result))}</code>"
     )
