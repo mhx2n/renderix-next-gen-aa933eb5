@@ -12,6 +12,9 @@ Exports:
 from __future__ import annotations
 
 import time
+import io
+import zipfile
+from datetime import datetime
 
 # (extension WITHOUT leading dot, friendly label, category bucket)
 FORMATS: list[tuple[str, str, str]] = [
@@ -196,18 +199,211 @@ def _safe_filename(ext: str) -> str:
 
 
 def build_file(ext: str, text: str) -> tuple[bytes, str, dict]:
-    """Return (raw_bytes, filename, stats). Always plain UTF-8 bytes —
-    we are converting source text, not re-rendering documents."""
+    """Return (raw_bytes, filename, stats).
+
+    Text-based formats are emitted as UTF-8. Binary document formats
+    (pdf, docx, odt, rtf, epub) are rendered to real, valid files so
+    Telegram/PDF readers can open them without "invalid format" errors.
+    """
     ext = (ext or "txt").lower().lstrip(".")
     if ext not in _BY_EXT:
         ext = "txt"
-    data = (text or "").encode("utf-8", errors="replace")
-    lines = (text or "").count("\n") + (1 if text and not text.endswith("\n") else 0)
+    src = text or ""
+    if ext == "pdf":
+        data = _render_pdf(src)
+    elif ext == "rtf":
+        data = _render_rtf(src)
+    elif ext == "docx":
+        data = _render_docx(src)
+    elif ext == "odt":
+        data = _render_odt(src)
+    elif ext == "epub":
+        data = _render_epub(src)
+    else:
+        data = src.encode("utf-8", errors="replace")
+    lines = src.count("\n") + (1 if src and not src.endswith("\n") else 0)
     stats = {
         "messages": 1,
         "lines": max(1, lines),
-        "characters": len(text or ""),
+        "characters": len(src),
         "bytes": len(data),
         "ext": ext,
     }
     return data, _safe_filename(ext), stats
+
+
+# ----------------------------------------------------------------------
+# Binary renderers
+# ----------------------------------------------------------------------
+def _render_pdf(text: str) -> bytes:
+    """Render text to a real PDF using fpdf2 (Unicode-safe via core fonts +
+    latin-1 replacement for unsupported glyphs)."""
+    try:
+        from fpdf import FPDF  # fpdf2
+    except Exception:
+        # Last-resort hand-built minimal PDF (latin-1 only).
+        return _render_pdf_minimal(text)
+    pdf = FPDF(format="A4", unit="mm")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=11)
+    safe = (text or "").encode("latin-1", errors="replace").decode("latin-1")
+    if not safe.strip():
+        safe = " "
+    for line in safe.split("\n"):
+        try:
+            pdf.multi_cell(0, 6, line if line else " ")
+        except Exception:
+            pdf.multi_cell(0, 6, " ")
+    out = pdf.output(dest="S")
+    if isinstance(out, str):
+        out = out.encode("latin-1", errors="replace")
+    return bytes(out)
+
+
+def _render_pdf_minimal(text: str) -> bytes:
+    """Tiny single-page PDF without dependencies. Latin-1 only."""
+    safe = (text or " ").encode("latin-1", errors="replace").decode("latin-1")
+    # Escape PDF special chars
+    safe = safe.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    lines = safe.split("\n")[:60]
+    stream_lines = ["BT", "/F1 11 Tf", "50 800 Td", "13 TL"]
+    for i, ln in enumerate(lines):
+        stream_lines.append(f"({ln[:120]}) Tj" if i == 0 else f"T* ({ln[:120]}) Tj")
+    stream_lines.append("ET")
+    stream = "\n".join(stream_lines).encode("latin-1")
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    buf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = []
+    for i, o in enumerate(objs, start=1):
+        offsets.append(len(buf))
+        buf += f"{i} 0 obj\n".encode() + o + b"\nendobj\n"
+    xref_off = len(buf)
+    buf += f"xref\n0 {len(objs)+1}\n".encode()
+    buf += b"0000000000 65535 f \n"
+    for off in offsets:
+        buf += f"{off:010d} 00000 n \n".encode()
+    buf += f"trailer\n<< /Size {len(objs)+1} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n".encode()
+    return bytes(buf)
+
+
+def _render_rtf(text: str) -> bytes:
+    body = (text or "").replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+    body = body.replace("\n", "\\par\n")
+    rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Helvetica;}}\\fs22 " + body + "}"
+    return rtf.encode("latin-1", errors="replace")
+
+
+def _render_docx(text: str) -> bytes:
+    """Minimal valid .docx (OOXML) without python-docx."""
+    from xml.sax.saxutils import escape as xe
+    paragraphs = "".join(
+        f"<w:p><w:r><w:t xml:space=\"preserve\">{xe(line)}</w:t></w:r></w:p>"
+        for line in (text or " ").split("\n")
+    )
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f'<w:body>{paragraphs}</w:body></w:document>'
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        '</Types>'
+    )
+    rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+        '</Relationships>'
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", content_types)
+        z.writestr("_rels/.rels", rels)
+        z.writestr("word/document.xml", document_xml)
+    return buf.getvalue()
+
+
+def _render_odt(text: str) -> bytes:
+    from xml.sax.saxutils import escape as xe
+    paragraphs = "".join(f"<text:p>{xe(line)}</text:p>" for line in (text or " ").split("\n"))
+    content_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<office:document-content '
+        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+        'office:version="1.2">'
+        f'<office:body><office:text>{paragraphs}</office:text></office:body>'
+        '</office:document-content>'
+    )
+    manifest = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">'
+        '<manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>'
+        '<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>'
+        '</manifest:manifest>'
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("mimetype", "application/vnd.oasis.opendocument.text", compress_type=zipfile.ZIP_STORED)
+        z.writestr("META-INF/manifest.xml", manifest)
+        z.writestr("content.xml", content_xml)
+    return buf.getvalue()
+
+
+def _render_epub(text: str) -> bytes:
+    from xml.sax.saxutils import escape as xe
+    ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = "".join(f"<p>{xe(line) or '&#160;'}</p>" for line in (text or " ").split("\n"))
+    chapter = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml">'
+        f'<head><title>Message</title></head><body>{body}</body></html>'
+    )
+    content_opf = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="3.0">'
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:identifier id="BookId">urn:uuid:message</dc:identifier>'
+        '<dc:title>Message</dc:title><dc:language>en</dc:language>'
+        f'<meta property="dcterms:modified">{ts}</meta>'
+        '</metadata>'
+        '<manifest>'
+        '<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>'
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+        '</manifest>'
+        '<spine><itemref idref="ch1"/></spine>'
+        '</package>'
+    )
+    nav = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+        '<head><title>Nav</title></head><body>'
+        '<nav epub:type="toc"><ol><li><a href="ch1.xhtml">Message</a></li></ol></nav>'
+        '</body></html>'
+    )
+    container = (
+        '<?xml version="1.0"?>'
+        '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+        '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>'
+        '</container>'
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        z.writestr("META-INF/container.xml", container)
+        z.writestr("OEBPS/content.opf", content_opf)
+        z.writestr("OEBPS/ch1.xhtml", chapter)
+        z.writestr("OEBPS/nav.xhtml", nav)
+    return buf.getvalue()

@@ -261,8 +261,16 @@ async def inspect_key(key: str) -> dict:
         return await _probe_all(session, key)
 
 
-async def try_model(key: str, model: str, prompt: str) -> str:
-    provider = _detect(key)
+async def try_model(key: str, model: str, prompt: str, kind: str | None = None) -> str:
+    """Call a model.
+
+    `kind` overrides prefix detection — important for `sk-...` keys that
+    are ambiguous between OpenAI / DeepSeek / Mistral / Fireworks / etc.
+    Callers (e.g. /tryke) should pass the kind resolved during /key.
+    """
+    provider = (kind or "").lower().strip() or _detect(key)
+    if provider in ("ambiguous_sk", "unknown", ""):
+        provider = _detect(key)
     m_lower = (model or "").lower()
     # Friendly guard: non-chat models (embeddings, transcription, image, tts, etc.)
     NON_CHAT_HINTS = ("embed", "embedding", "transcribe", "whisper", "tts", "speech",

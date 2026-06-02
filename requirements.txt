@@ -11,3 +11,4 @@ yt-dlp>=2025.5.22
 Pillow==10.4.0
 motor==3.5.1
 pymongo==4.8.0
+fpdf2==2.7.9

@@ -111,9 +111,13 @@ async def _amain():
     try:
         await app.updater.start_polling(
             drop_pending_updates=True,
-            allowed_updates=[
-                "message", "callback_query", "edited_message", "inline_query",
-            ],
+            # Long-polling at 50s drastically cuts the number of getUpdates
+            # round-trips (~5x less than the 10s default) so Render egress
+            # stays inside the 5 GB / month free quota.
+            timeout=50,
+            poll_interval=0.0,
+            # Skip update types the bot does not use — saves payload bytes.
+            allowed_updates=["message", "callback_query"],
             error_callback=_polling_error_callback,
         )
     except Exception as exc:
