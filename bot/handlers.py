@@ -1162,7 +1162,8 @@ async def cmd_tryke(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args[1:])
     placeholder = await update.effective_message.reply_text(f"Calling {model}...")
     try:
-        out = await asyncio.wait_for(try_model(key, model, prompt), timeout=120)
+        kind = _PENDING_KIND.get(update.effective_user.id)
+        out = await asyncio.wait_for(try_model(key, model, prompt, kind=kind), timeout=120)
         await stream_edit(placeholder, f"<b>{escape_html(model)}</b>\n\n{format_ai_answer(out)}")
     except Exception as e:
         msg = str(e)
