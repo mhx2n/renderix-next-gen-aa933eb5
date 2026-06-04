@@ -684,36 +684,158 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 _DC_HINT = {1: "Miami, USA", 2: "Amsterdam, NL", 3: "Miami, USA",
             4: "Amsterdam, NL", 5: "Singapore"}
 
+# Approximate anchors mapping Telegram user_id -> account creation date.
+_TG_ID_ANCHORS = [
+    (1,             "2013-08-01"),
+    (100_000_000,   "2013-08-01"),
+    (200_000_000,   "2014-08-01"),
+    (400_000_000,   "2017-05-01"),
+    (714_301_000,   "2020-04-01"),
+    (1_000_000_000, "2020-08-01"),
+    (1_273_841_502, "2020-11-13"),
+    (1_500_000_000, "2021-05-04"),
+    (2_000_000_000, "2022-12-01"),
+    (4_000_000_000, "2023-06-15"),
+    (5_000_000_000, "2023-09-20"),
+    (6_000_000_000, "2023-12-25"),
+    (7_000_000_000, "2024-04-15"),
+    (7_500_000_000, "2024-08-01"),
+    (8_000_000_000, "2025-01-01"),
+    (8_300_000_000, "2025-05-01"),
+    (8_500_000_000, "2025-08-01"),
+    (8_700_000_000, "2026-01-01"),
+    (9_000_000_000, "2026-06-01"),
+]
+
+
+def _estimate_created(user_id: int):
+    """Return (datetime, 'Month DD, YYYY', 'Yy, Mm, Dd') for a Telegram user id."""
+    from datetime import datetime, timezone
+    import calendar as _cal
+    try:
+        uid = int(user_id)
+    except Exception:
+        return None, "—", "—"
+    anchors = _TG_ID_ANCHORS
+    lo, hi = anchors[0], anchors[-1]
+    for i in range(len(anchors) - 1):
+        if anchors[i][0] <= uid <= anchors[i + 1][0]:
+            lo, hi = anchors[i], anchors[i + 1]
+            break
+    else:
+        if uid < anchors[0][0]:
+            lo, hi = anchors[0], anchors[1]
+        else:
+            lo, hi = anchors[-2], anchors[-1]
+    d_lo = datetime.fromisoformat(lo[1]).replace(tzinfo=timezone.utc)
+    d_hi = datetime.fromisoformat(hi[1]).replace(tzinfo=timezone.utc)
+    span = max(1, hi[0] - lo[0])
+    frac = max(0.0, min(1.0, (uid - lo[0]) / span))
+    created = d_lo + (d_hi - d_lo) * frac
+    now = datetime.now(timezone.utc)
+    y = now.year - created.year
+    m = now.month - created.month
+    d = now.day - created.day
+    if d < 0:
+        m -= 1
+        pm = now.month - 1 or 12
+        py = now.year if now.month - 1 >= 1 else now.year - 1
+        d += _cal.monthrange(py, pm)[1]
+    if m < 0:
+        y -= 1
+        m += 12
+    if y < 0:
+        y, m, d = 0, 0, 0
+    age = f"{y}y, {m}m, {d}d"
+    pretty = created.strftime("%B %d, %Y").replace(" 0", " ")
+    return created, pretty, age
+
+
+async def _resolve_info_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    if msg and msg.reply_to_message and msg.reply_to_message.from_user:
+        return msg.reply_to_message.from_user
+    args = list(context.args or [])
+    if args:
+        token = args[0].strip()
+        try:
+            if token.startswith("@"):
+                chat = await context.bot.get_chat(token)
+            elif token.lstrip("-").isdigit():
+                chat = await context.bot.get_chat(int(token))
+            else:
+                chat = await context.bot.get_chat(f"@{token}")
+            class _U: pass
+            u = _U()
+            u.id = chat.id
+            u.first_name = getattr(chat, "first_name", None) or getattr(chat, "title", None) or ""
+            u.last_name = getattr(chat, "last_name", None) or ""
+            u.username = getattr(chat, "username", None)
+            u.is_premium = getattr(chat, "is_premium", False)
+            return u
+        except Exception:
+            return None
+    return update.effective_user
+
 
 async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_ok(update, context):
         return
-    u = update.effective_user
-    chat = update.effective_chat
-    full_name = " ".join([n for n in [u.first_name, u.last_name] if n]) or "—"
-    username = f"@{u.username}" if u.username else "—"
+    msg = update.effective_message
+    u = await _resolve_info_target(update, context)
+    if not u:
+        await msg.reply_text("Couldn't resolve that user. Reply to their message, or pass @username / id.")
+        return
+
+    full_name = " ".join([n for n in [getattr(u, "first_name", "") or "", getattr(u, "last_name", "") or ""] if n]) or "—"
+    uname = getattr(u, "username", None)
+    username_disp = f"@{uname}" if uname else "—"
     premium = "Yes" if getattr(u, "is_premium", False) else "No"
-    dc_id = None
+    _, created_str, age_str = _estimate_created(u.id)
+
+    photo_file_id = None
     try:
         photos = await context.bot.get_user_profile_photos(u.id, limit=1)
         if photos.total_count and photos.photos:
-            dc_id = photos.photos[0][-1].file_id
-            # dc_id from PhotoSize isn't always exposed; fall back below.
-            dc_id = getattr(photos.photos[0][-1], "dc_id", None)
+            photo_file_id = photos.photos[0][-1].file_id
     except Exception:
-        pass
-    dc_text = f"{dc_id}" + (f"  •  {_DC_HINT.get(dc_id)}" if dc_id in _DC_HINT else "") if dc_id else "—"
-    text = (
-        "👤 <b>User Information</b>\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f" - <b>Full Name:</b> {escape_html(full_name)}\n"
-        f" - <b>User ID:</b> <code>{u.id}</code>\n"
-        f" - <b>Username:</b> {escape_html(username)}\n"
-        f" - <b>Premium User:</b> {premium}\n"
-        f" - <b>Data Center:</b> {escape_html(str(dc_text))}\n"
-        f" - <b>Chat Id:</b> <code>{chat.id if chat else u.id}</code>"
+        photo_file_id = None
+
+    uname_html = (
+        f"<a href=\"https://t.me/{uname}\">{escape_html(username_disp)}</a>"
+        if uname else username_disp
     )
-    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+    caption = (
+        "「 <b>User Information</b> 」\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Name:</b> {escape_html(full_name)}\n"
+        f"🔤 <b>Username:</b> {uname_html}\n"
+        f"🆔 <b>User ID:</b> <code>{u.id}</code>\n"
+        f"⭐ <b>Premium:</b> {premium}\n"
+        f"📅 <b>Created:</b> {escape_html(created_str)}\n"
+        f"⏳ <b>Age:</b> {escape_html(age_str)}\n"
+        "━━━━━━━━━━━━━━━━━━"
+    )
+
+    profile_url = f"https://t.me/{uname}" if uname else f"tg://user?id={u.id}"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("👁 View Profile", url=profile_url)]])
+
+    try:
+        if photo_file_id:
+            await msg.reply_photo(
+                photo=photo_file_id, caption=caption,
+                parse_mode=ParseMode.HTML, reply_markup=kb,
+            )
+        else:
+            await msg.reply_text(
+                caption, parse_mode=ParseMode.HTML, reply_markup=kb,
+                disable_web_page_preview=True,
+            )
+    except Exception:
+        await msg.reply_text(
+            caption, parse_mode=ParseMode.HTML, reply_markup=kb,
+            disable_web_page_preview=True,
+        )
 
 
 # ============================================================
