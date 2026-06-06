@@ -817,25 +817,37 @@ async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━"
     )
 
-    profile_url = f"https://t.me/{uname}" if uname else f"tg://user?id={u.id}"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("👁 View Profile", url=profile_url)]])
+    # Only attach an inline button when we have a valid public https URL.
+    # tg:// URLs are rejected by Telegram inline buttons and crash reply_photo.
+    kb = None
+    if uname:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+            "👁 View Profile", url=f"https://t.me/{uname}")]])
 
-    try:
-        if photo_file_id:
-            await msg.reply_photo(
-                photo=photo_file_id, caption=caption,
-                parse_mode=ParseMode.HTML, reply_markup=kb,
-            )
-        else:
+    sent = False
+    if photo_file_id:
+        # Try photo + caption + kb → photo + caption → text fallback.
+        for attempt_kb in (kb, None):
+            try:
+                await msg.reply_photo(
+                    photo=photo_file_id, caption=caption,
+                    parse_mode=ParseMode.HTML, reply_markup=attempt_kb,
+                )
+                sent = True
+                break
+            except Exception:
+                continue
+    if not sent:
+        try:
             await msg.reply_text(
                 caption, parse_mode=ParseMode.HTML, reply_markup=kb,
                 disable_web_page_preview=True,
             )
-    except Exception:
-        await msg.reply_text(
-            caption, parse_mode=ParseMode.HTML, reply_markup=kb,
-            disable_web_page_preview=True,
-        )
+        except Exception:
+            await msg.reply_text(
+                caption, parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
 
 
 # ============================================================
