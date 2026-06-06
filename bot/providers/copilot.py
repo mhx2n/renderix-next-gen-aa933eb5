@@ -92,3 +92,82 @@ def _ask_sync(prompt: str, history: list) -> str:
 
 async def ask(prompt: str, history: list) -> str:
     return await asyncio.to_thread(_ask_sync, prompt, history)
+
+
+# ---------------------------------------------------------------------------
+# Streaming variant — yields incremental text deltas as Copilot generates.
+# Used by the guest-mention / bot-to-bot handler so replies feel animated
+# (matches Telegram's May 2026 "streamed AI answers" platform feature).
+# ---------------------------------------------------------------------------
+async def ask_stream(prompt: str, history: list):
+    """Async generator: yields cumulative answer text as it grows."""
+    if history:
+        ctx = "\n".join(f"User: {h['q']}\nAssistant: {h['a']}" for h in history[-3:])
+        prompt = f"Context:\n{ctx}\n\nQuestion: {prompt}"
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    DONE = object()
+
+    def _runner():
+        try:
+            client = _CopilotClient()
+            ws_url = (
+                f"wss://copilot.microsoft.com/c/api/chat?api-version=2&"
+                f"clientSessionId={client.client_id}"
+            )
+            cookies = "; ".join(
+                f"{k}={v}" for k, v in client.session.cookies.get_dict().items()
+            )
+            state = {"mid": None, "buf": ""}
+
+            def on_open(ws):
+                ws.send(json.dumps({
+                    "event": "setOptions",
+                    "supportedCards": ["image", "video", "finance", "local", "sports"],
+                    "supportedActions": [], "supportedFeatures": [],
+                }))
+                ws.send(json.dumps({
+                    "event": "send",
+                    "content": [{"type": "text", "text": prompt}],
+                    "conversationId": client.conversation_id,
+                }))
+
+            def on_message(ws, msg):
+                try:
+                    data = json.loads(msg)
+                except Exception:
+                    return
+                ev = data.get("event")
+                if ev == "startMessage":
+                    state["mid"] = data.get("messageId")
+                elif ev == "appendText" and data.get("messageId") == state["mid"]:
+                    state["buf"] += data.get("text", "")
+                    loop.call_soon_threadsafe(queue.put_nowait, state["buf"])
+                elif ev == "done":
+                    ws.close()
+                    loop.call_soon_threadsafe(queue.put_nowait, DONE)
+
+            def on_error(_ws, _err):
+                loop.call_soon_threadsafe(queue.put_nowait, DONE)
+
+            ws = websocket.WebSocketApp(
+                ws_url,
+                header=[
+                    f"Cookie: {cookies}",
+                    "User-Agent: CopilotNative/30.0.440421003-prod (Android 11; Google; sdk_gphone_arm64)",
+                    "X-Search-UILang: en-US",
+                ],
+                on_open=on_open, on_message=on_message, on_error=on_error,
+            )
+            ws.run_forever()
+        except Exception:
+            loop.call_soon_threadsafe(queue.put_nowait, DONE)
+
+    threading.Thread(target=_runner, daemon=True).start()
+
+    while True:
+        item = await asyncio.wait_for(queue.get(), timeout=120)
+        if item is DONE:
+            return
+        yield item
