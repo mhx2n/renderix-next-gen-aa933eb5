@@ -34,7 +34,7 @@ from .providers import (
 from .utils import clean_text, format_ai_answer, chunk_text, escape_html, human_size, safe_user_error, process_metrics, format_duration
 from .keycheck import inspect_key, try_model
 from .tools import textenc as _textenc, language as _language, photo as _photo, shorten as _shorten, stylish as _stylish, translate as _translate, ocr as _ocr
-from .tools import extras as _extras, m2t as _m2t, convert as _cv, guest as _guest
+from .tools import extras as _extras, m2t as _m2t, convert as _cv
 
 
 _HISTORY: dict = defaultdict(list)
@@ -3204,7 +3204,6 @@ def register_handlers(app: Application):
     _stylish.register(app)
     _translate.register(app)
     _ocr.register(app)
-    _guest.register(app)
 
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(InlineQueryHandler(on_inline_query))
