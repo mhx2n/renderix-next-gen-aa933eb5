@@ -82,14 +82,17 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender = msg.from_user
     if sender and sender.id == context.bot.id:
         return  # never reply to ourselves
+    # Never reply to other bots — avoids bot-to-bot loops in groups where
+    # an AI bot (e.g. @QuryaBot) answers and our bot would chain-reply.
+    if sender and sender.is_bot:
+        return
 
     is_group = chat.type in ("group", "supergroup")
     mentioned = _bot_mentioned(text, bot_user)
     replied_to_bot = bool(rep and rep.from_user and rep.from_user.id == context.bot.id)
-    from_bot = bool(sender and sender.is_bot)
 
     # Trigger only on explicit guest signals — otherwise let on_text handle it.
-    if not (mentioned or (is_group and replied_to_bot) or from_bot):
+    if not (mentioned or (is_group and replied_to_bot)):
         return
 
     # Banned users (private only — bots have no ban state)
@@ -115,7 +118,11 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     try:
-        placeholder = await msg.reply_text("✨ thinking…")
+        placeholder = await msg.reply_text(
+            "✨ thinking…",
+            reply_to_message_id=msg.message_id,
+            allow_sending_without_reply=True,
+        )
     except Exception:
         raise ApplicationHandlerStop
 
