@@ -2620,6 +2620,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (msg.text or msg.caption or "").strip()
     if not text:
         return
+    # Never reply to other bots' messages (avoids bot-to-bot loops).
+    if update.effective_user and update.effective_user.is_bot:
+        return
     await db.upsert_user(update.effective_user)
     if await db.is_banned(update.effective_user.id):
         return
