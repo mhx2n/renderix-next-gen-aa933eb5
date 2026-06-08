@@ -37,6 +37,7 @@ SYSTEM_PREFIX = (
 
 _EDIT_MIN_INTERVAL = 1.4
 _MAX_LEN = 3800
+_PLACEHOLDER = "\u2063"
 
 
 def _bot_mentioned(text: str, username: str) -> bool:
@@ -60,6 +61,42 @@ async def _safe_edit(message, text: str):
             await message.edit_text(text[:_MAX_LEN], disable_web_page_preview=True)
         except Exception:
             pass
+
+
+async def _safe_send(msg, context: ContextTypes.DEFAULT_TYPE, text: str):
+    try:
+        return await msg.reply_text(
+            text[:_MAX_LEN],
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_to_message_id=msg.message_id,
+            allow_sending_without_reply=True,
+        )
+    except Exception:
+        try:
+            return await msg.reply_text(
+                text[:_MAX_LEN],
+                disable_web_page_preview=True,
+                reply_to_message_id=msg.message_id,
+                allow_sending_without_reply=True,
+            )
+        except Exception:
+            try:
+                return await context.bot.send_message(
+                    chat_id=msg.chat_id,
+                    text=text[:_MAX_LEN],
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            except Exception:
+                try:
+                    return await context.bot.send_message(
+                        chat_id=msg.chat_id,
+                        text=text[:_MAX_LEN],
+                        disable_web_page_preview=True,
+                    )
+                except Exception:
+                    return None
 
 
 async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -110,14 +147,7 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
-    try:
-        placeholder = await msg.reply_text(
-            "✨ thinking…",
-            reply_to_message_id=msg.message_id,
-            allow_sending_without_reply=True,
-        )
-    except Exception:
-        raise ApplicationHandlerStop
+    placeholder = await _safe_send(msg, context, _PLACEHOLDER)
 
     last_edit = 0.0
     last_sent = ""
@@ -126,6 +156,8 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async for partial in copilot.ask_stream(SYSTEM_PREFIX + prompt, []):
             final_text = partial
             now = time.monotonic()
+            if not placeholder:
+                continue
             if now - last_edit < _EDIT_MIN_INTERVAL:
                 continue
             preview = format_ai_answer(partial) + " ▍"
@@ -135,34 +167,55 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             last_edit = now
             await _safe_edit(placeholder, preview)
     except asyncio.TimeoutError:
-        await _safe_edit(placeholder, "⏱ Copilot timed out. Please try again.")
-        raise ApplicationHandlerStop
-    except Exception as e:
-        await _safe_edit(
-            placeholder,
-            "Copilot is temporarily unavailable. Please try again shortly.",
-        )
         try:
-            await db.log("ERROR", sender.id if sender else 0, "guest", str(e)[:400])
+            final_text = await asyncio.wait_for(copilot.ask(SYSTEM_PREFIX + prompt, []), timeout=60)
         except Exception:
-            pass
-        raise ApplicationHandlerStop
+            if placeholder:
+                await _safe_edit(placeholder, "⏱ Copilot timed out. Please try again.")
+            else:
+                await _safe_send(msg, context, "⏱ Copilot timed out. Please try again.")
+            raise ApplicationHandlerStop
+    except Exception as e:
+        try:
+            final_text = await asyncio.wait_for(copilot.ask(SYSTEM_PREFIX + prompt, []), timeout=60)
+        except Exception:
+            if placeholder:
+                await _safe_edit(
+                    placeholder,
+                    "Copilot is temporarily unavailable. Please try again shortly.",
+                )
+            else:
+                await _safe_send(msg, context, "Copilot is temporarily unavailable. Please try again shortly.")
+            try:
+                await db.log("ERROR", sender.id if sender else 0, "guest", str(e)[:400])
+            except Exception:
+                pass
+            raise ApplicationHandlerStop
 
     if not final_text:
-        await _safe_edit(placeholder, "Copilot returned no content.")
-        raise ApplicationHandlerStop
+        try:
+            final_text = await asyncio.wait_for(copilot.ask(SYSTEM_PREFIX + prompt, []), timeout=60)
+        except Exception:
+            if placeholder:
+                await _safe_edit(placeholder, "Copilot returned no content.")
+            else:
+                await _safe_send(msg, context, "Copilot returned no content.")
+            raise ApplicationHandlerStop
 
     body = format_ai_answer(final_text)
     if len(body) <= _MAX_LEN:
-        await _safe_edit(placeholder, body)
+        if placeholder:
+            await _safe_edit(placeholder, body)
+        else:
+            await _safe_send(msg, context, body)
     else:
-        await _safe_edit(placeholder, body[:_MAX_LEN])
+        if placeholder:
+            await _safe_edit(placeholder, body[:_MAX_LEN])
+        else:
+            await _safe_send(msg, context, body[:_MAX_LEN])
         for i in range(_MAX_LEN, len(body), _MAX_LEN):
             try:
-                await msg.reply_text(
-                    body[i:i + _MAX_LEN], parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
+                await _safe_send(msg, context, body[i:i + _MAX_LEN])
             except Exception:
                 break
 
