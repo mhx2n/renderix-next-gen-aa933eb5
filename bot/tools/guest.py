@@ -122,8 +122,11 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_group = chat.type in ("group", "supergroup")
     mentioned = _bot_mentioned(text, bot_user)
     replied_to_bot = bool(rep and rep.from_user and rep.from_user.id == context.bot.id)
+    replied_to_other_bot = bool(rep and rep.from_user and rep.from_user.is_bot and rep.from_user.id != context.bot.id)
 
     if not (mentioned or (is_group and replied_to_bot)):
+        return
+    if replied_to_other_bot:
         return
 
     try:
