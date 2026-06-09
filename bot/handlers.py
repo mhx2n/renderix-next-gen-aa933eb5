@@ -2844,6 +2844,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sess = await db.get_session(update.effective_chat.id, rep.message_id)
         if sess:
             provider_key = sess[0]
+            if provider_key == "guest":
+                await _guest.continue_session(update, context, text)
+                return
             if provider_key in REGISTRY:
                 await _call_provider(update, context, provider_key, text)
                 return
