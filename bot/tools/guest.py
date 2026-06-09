@@ -10,6 +10,7 @@ Uses Microsoft Copilot with streaming for animated responses.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 
@@ -230,6 +231,13 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if sender:
             await db.log("INFO", sender.id, "guest", prompt[:200])
+    except Exception:
+        pass
+
+    try:
+        if placeholder:
+            state = json.dumps([{"q": prompt, "a": (final_text or "")[:4000]}])
+            await db.save_session(chat.id, placeholder.message_id, "co", state)
     except Exception:
         pass
 
