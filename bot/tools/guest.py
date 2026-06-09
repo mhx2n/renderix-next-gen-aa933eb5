@@ -1,11 +1,8 @@
 """Guest AI Bot / @mention handler.
 
-Triggers on:
-  • @<bot_username> mention in any chat (group/private/channel-as-supergroup)
-  • Reply-to-bot in groups
-
-Never replies to other bots (prevents bot-to-bot loops).
-Uses Microsoft Copilot with streaming for animated responses.
+Triggers on explicit @<bot_username> mentions.
+Guest reply-chains are stored under a dedicated "guest" session key so they
+never collide with command-based AI modes like /co or .co.
 """
 from __future__ import annotations
 
@@ -100,6 +97,167 @@ async def _safe_send(msg, context: ContextTypes.DEFAULT_TYPE, text: str):
                     return None
 
 
+async def _load_guest_history(chat_id: int, reply_message_id: int | None):
+    if not reply_message_id:
+        return [], None
+    try:
+        sess = await db.get_session(chat_id, reply_message_id)
+    except Exception:
+        sess = None
+    if not sess or sess[0] != "guest":
+        return [], None
+    try:
+        history = json.loads(sess[1]) if sess[1] else []
+    except Exception:
+        history = []
+    return history, reply_message_id
+
+
+async def _run_guest(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    prompt: str,
+    history: list | None = None,
+    root_id: int | None = None,
+):
+    msg = update.effective_message
+    chat = update.effective_chat
+    sender = msg.from_user if msg else None
+    if not msg or not chat:
+        return False
+
+    try:
+        if sender and await db.is_banned(sender.id):
+            return False
+    except Exception:
+        pass
+
+    if not prompt.strip():
+        prompt = "Hello"
+
+    try:
+        await context.bot.send_chat_action(chat.id, ChatAction.TYPING)
+    except Exception:
+        pass
+
+    placeholder = await _safe_send(msg, context, _PLACEHOLDER)
+    sent_message = placeholder
+
+    last_edit = 0.0
+    last_sent = ""
+    final_text = ""
+    try:
+        async for partial in copilot.ask_stream(SYSTEM_PREFIX + prompt, history or []):
+            final_text = partial
+            now = time.monotonic()
+            if not placeholder:
+                continue
+            if now - last_edit < _EDIT_MIN_INTERVAL:
+                continue
+            preview = format_ai_answer(partial) + " ▍"
+            if preview == last_sent:
+                continue
+            last_sent = preview
+            last_edit = now
+            await _safe_edit(placeholder, preview)
+    except asyncio.TimeoutError:
+        try:
+            final_text = await asyncio.wait_for(
+                copilot.ask(SYSTEM_PREFIX + prompt, history or []), timeout=60
+            )
+        except Exception:
+            if placeholder:
+                await _safe_edit(placeholder, "⏱ Copilot timed out. Please try again.")
+            else:
+                await _safe_send(msg, context, "⏱ Copilot timed out. Please try again.")
+            return False
+    except Exception as e:
+        try:
+            final_text = await asyncio.wait_for(
+                copilot.ask(SYSTEM_PREFIX + prompt, history or []), timeout=60
+            )
+        except Exception:
+            if placeholder:
+                await _safe_edit(
+                    placeholder,
+                    "Copilot is temporarily unavailable. Please try again shortly.",
+                )
+            else:
+                await _safe_send(
+                    msg,
+                    context,
+                    "Copilot is temporarily unavailable. Please try again shortly.",
+                )
+            try:
+                await db.log("ERROR", sender.id if sender else 0, "guest", str(e)[:400])
+            except Exception:
+                pass
+            return False
+
+    if not final_text:
+        try:
+            final_text = await asyncio.wait_for(
+                copilot.ask(SYSTEM_PREFIX + prompt, history or []), timeout=60
+            )
+        except Exception:
+            if placeholder:
+                await _safe_edit(placeholder, "Copilot returned no content.")
+            else:
+                await _safe_send(msg, context, "Copilot returned no content.")
+            return False
+
+    body = format_ai_answer(final_text)
+    if len(body) <= _MAX_LEN:
+        if placeholder:
+            await _safe_edit(placeholder, body)
+            sent_message = placeholder
+        else:
+            sent_message = await _safe_send(msg, context, body)
+    else:
+        if placeholder:
+            await _safe_edit(placeholder, body[:_MAX_LEN])
+            sent_message = placeholder
+        else:
+            sent_message = await _safe_send(msg, context, body[:_MAX_LEN])
+        for i in range(_MAX_LEN, len(body), _MAX_LEN):
+            try:
+                await _safe_send(msg, context, body[i:i + _MAX_LEN])
+            except Exception:
+                break
+
+    try:
+        if sender:
+            await db.log("INFO", sender.id, "guest", prompt[:200])
+    except Exception:
+        pass
+
+    try:
+        if sent_message:
+            hist = list(history or [])
+            hist.append({"q": prompt, "a": (final_text or "")[:4000]})
+            hist = hist[-10:]
+            state = json.dumps(hist)
+            new_root = root_id or sent_message.message_id
+            await db.save_session(chat.id, new_root, "guest", state)
+            if sent_message.message_id != new_root:
+                await db.save_session(chat.id, sent_message.message_id, "guest", state)
+    except Exception:
+        pass
+
+    return True
+
+
+async def continue_session(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    msg = update.effective_message
+    chat = update.effective_chat
+    if not msg or not chat:
+        return False
+    rep = msg.reply_to_message
+    history, root_id = await _load_guest_history(chat.id, rep.message_id if rep else None)
+    await _run_guest(update, context, text.strip(), history=history, root_id=root_id)
+    return True
+
+
 async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg:
@@ -120,7 +278,6 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not chat:
         return
     rep = msg.reply_to_message
-    is_group = chat.type in ("group", "supergroup")
     mentioned = _bot_mentioned(text, bot_user)
     replied_to_bot = bool(rep and rep.from_user and rep.from_user.id == context.bot.id)
     replied_to_other_bot = bool(rep and rep.from_user and rep.from_user.is_bot and rep.from_user.id != context.bot.id)
@@ -135,111 +292,13 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if replied_to_other_bot:
         return
 
-    try:
-        if sender and await db.is_banned(sender.id):
-            raise ApplicationHandlerStop
-    except ApplicationHandlerStop:
-        raise
-    except Exception:
-        pass
-
     prompt = _strip_mention(text, bot_user) if mentioned else text
     if rep and not replied_to_bot:
         rep_text = (rep.text or rep.caption or "").strip()
         if rep_text:
             prompt = f"[Replied message]:\n{rep_text[:1500]}\n\n[Question]:\n{prompt}"
-    if not prompt.strip():
-        prompt = "Hello"
-
-    try:
-        await context.bot.send_chat_action(chat.id, ChatAction.TYPING)
-    except Exception:
-        pass
-
-    placeholder = await _safe_send(msg, context, _PLACEHOLDER)
-
-    last_edit = 0.0
-    last_sent = ""
-    final_text = ""
-    try:
-        async for partial in copilot.ask_stream(SYSTEM_PREFIX + prompt, []):
-            final_text = partial
-            now = time.monotonic()
-            if not placeholder:
-                continue
-            if now - last_edit < _EDIT_MIN_INTERVAL:
-                continue
-            preview = format_ai_answer(partial) + " ▍"
-            if preview == last_sent:
-                continue
-            last_sent = preview
-            last_edit = now
-            await _safe_edit(placeholder, preview)
-    except asyncio.TimeoutError:
-        try:
-            final_text = await asyncio.wait_for(copilot.ask(SYSTEM_PREFIX + prompt, []), timeout=60)
-        except Exception:
-            if placeholder:
-                await _safe_edit(placeholder, "⏱ Copilot timed out. Please try again.")
-            else:
-                await _safe_send(msg, context, "⏱ Copilot timed out. Please try again.")
-            raise ApplicationHandlerStop
-    except Exception as e:
-        try:
-            final_text = await asyncio.wait_for(copilot.ask(SYSTEM_PREFIX + prompt, []), timeout=60)
-        except Exception:
-            if placeholder:
-                await _safe_edit(
-                    placeholder,
-                    "Copilot is temporarily unavailable. Please try again shortly.",
-                )
-            else:
-                await _safe_send(msg, context, "Copilot is temporarily unavailable. Please try again shortly.")
-            try:
-                await db.log("ERROR", sender.id if sender else 0, "guest", str(e)[:400])
-            except Exception:
-                pass
-            raise ApplicationHandlerStop
-
-    if not final_text:
-        try:
-            final_text = await asyncio.wait_for(copilot.ask(SYSTEM_PREFIX + prompt, []), timeout=60)
-        except Exception:
-            if placeholder:
-                await _safe_edit(placeholder, "Copilot returned no content.")
-            else:
-                await _safe_send(msg, context, "Copilot returned no content.")
-            raise ApplicationHandlerStop
-
-    body = format_ai_answer(final_text)
-    if len(body) <= _MAX_LEN:
-        if placeholder:
-            await _safe_edit(placeholder, body)
-        else:
-            await _safe_send(msg, context, body)
-    else:
-        if placeholder:
-            await _safe_edit(placeholder, body[:_MAX_LEN])
-        else:
-            await _safe_send(msg, context, body[:_MAX_LEN])
-        for i in range(_MAX_LEN, len(body), _MAX_LEN):
-            try:
-                await _safe_send(msg, context, body[i:i + _MAX_LEN])
-            except Exception:
-                break
-
-    try:
-        if sender:
-            await db.log("INFO", sender.id, "guest", prompt[:200])
-    except Exception:
-        pass
-
-    try:
-        if placeholder:
-            state = json.dumps([{"q": prompt, "a": (final_text or "")[:4000]}])
-            await db.save_session(chat.id, placeholder.message_id, "co", state)
-    except Exception:
-        pass
+    history, root_id = await _load_guest_history(chat.id, rep.message_id if replied_to_bot else None)
+    await _run_guest(update, context, prompt, history=history, root_id=root_id)
 
     raise ApplicationHandlerStop
 
