@@ -37,7 +37,7 @@ SYSTEM_PREFIX = (
 
 _EDIT_MIN_INTERVAL = 1.4
 _MAX_LEN = 3800
-_PLACEHOLDER = "\u2063"
+_PLACEHOLDER = "✨ thinking…"
 
 
 def _bot_mentioned(text: str, username: str) -> bool:
@@ -124,8 +124,13 @@ async def _handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     replied_to_bot = bool(rep and rep.from_user and rep.from_user.id == context.bot.id)
     replied_to_other_bot = bool(rep and rep.from_user and rep.from_user.is_bot and rep.from_user.id != context.bot.id)
 
-    if not (mentioned or (is_group and replied_to_bot)):
+    # Guest mode triggers ONLY on explicit @mention.
+    # Replying to our own bot's AI message must fall through to the
+    # normal on_text handler (inbox-style conversational AI),
+    # not be hijacked by the guest/Copilot handler.
+    if not mentioned:
         return
+    # Never auto-reply to another bot's message.
     if replied_to_other_bot:
         return
 
