@@ -128,6 +128,12 @@ async def _send_force_join_warning(update: Update, context: ContextTypes.DEFAULT
 
 async def force_join_ok(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     from . import config as cfg
+    # Owner kill-switch: when disabled, never block and never warn.
+    try:
+        if (await db.get_setting("force_join_enabled", "1")) == "0":
+            return True
+    except Exception:
+        pass
     channel = cfg.FORCE_JOIN_CHANNEL or FORCE_JOIN_CHANNEL
     if not channel:
         return True
