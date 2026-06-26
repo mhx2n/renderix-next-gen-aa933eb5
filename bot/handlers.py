@@ -1602,6 +1602,25 @@ async def cmd_setchannel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(f"Force-join channel: {val or '(disabled)'}")
 
 
+async def cmd_forcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner: turn the force-join warning on/off without losing the channel."""
+    if not await _owner_only(update): return
+    cur = (await db.get_setting("force_join_enabled", "1")) != "0"
+    arg = (context.args[0].lower() if context.args else "").strip()
+    if arg in ("on", "1", "enable", "enabled"):
+        await db.set_setting("force_join_enabled", "1")
+        await update.effective_message.reply_text("✅ Force-join is now <b>ON</b>.", parse_mode=ParseMode.HTML)
+    elif arg in ("off", "0", "disable", "disabled"):
+        await db.set_setting("force_join_enabled", "0")
+        await update.effective_message.reply_text("🟡 Force-join is now <b>OFF</b>. Users won't be asked to join.", parse_mode=ParseMode.HTML)
+    else:
+        await update.effective_message.reply_text(
+            f"Force-join is currently <b>{'ON' if cur else 'OFF'}</b>.\n"
+            f"Usage: <code>/forcejoin on</code> | <code>/forcejoin off</code>",
+            parse_mode=ParseMode.HTML,
+        )
+
+
 async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _owner_only(update): return
     if not context.args:
