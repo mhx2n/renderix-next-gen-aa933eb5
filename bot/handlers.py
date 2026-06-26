@@ -3203,7 +3203,7 @@ def register_handlers(app: Application):
         import re as _re
         m = _re.match(r"/([A-Za-z0-9_]+)", text)
         cmd = (m.group(1).lower() if m else "")
-        if cmd in ("start", "setchannel"):
+        if cmd in ("start", "setchannel", "forcejoin"):
             return
         if not await force_join_ok(update, context):
             raise ApplicationHandlerStop
