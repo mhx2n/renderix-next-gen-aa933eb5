@@ -1225,6 +1225,15 @@ async def _do_inspect(update: Update, key: str):
             _PENDING_KIND[update.effective_user.id] = (info.get("kind") or "").lower()
         except Exception:
             pass
+        # cache resolved base URL (third-party aggregators expose this)
+        try:
+            b = info.get("base") or (info.get("limits", {}) or {}).get("endpoint")
+            if b:
+                _PENDING_BASE[update.effective_user.id] = b
+            else:
+                _PENDING_BASE.pop(update.effective_user.id, None)
+        except Exception:
+            pass
         models = info.get("models", [])
         limits = info.get("limits", {})
         uid = update.effective_user.id
