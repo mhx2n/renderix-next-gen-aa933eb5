@@ -1936,7 +1936,7 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     from .keycheck import _detect, inspect_key
     kind = (_PENDING_KIND.get(uid) or "").lower()
-    _SUPPORTED = set(_PROVIDER_BASE_URLS) | {"anthropic", "gemini"}
+    _SUPPORTED = set(_PROVIDER_BASE_URLS) | {"anthropic", "gemini", "third_party"}
     if not kind or kind not in _SUPPORTED:
         # detection fallback: prefix sniff
         guess = _detect(key)
@@ -1949,9 +1949,20 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if info.get("valid"):
                     kind = (info.get("kind") or "").lower()
                     _PENDING_KIND[uid] = kind
+                    b = info.get("base") or (info.get("limits", {}) or {}).get("endpoint")
+                    if b:
+                        _PENDING_BASE[uid] = b
             except Exception:
                 pass
     base_url = _PROVIDER_BASE_URLS.get(kind)  # None for anthropic/gemini (handled below)
+    if kind == "third_party":
+        base_url = _PENDING_BASE.get(uid)
+        if not base_url:
+            await update.effective_message.reply_text(
+                "Third-party proxy key found but its endpoint isn't cached. "
+                "Run /key <API_KEY> again, then retry /addmodel."
+            )
+            return
     if kind not in _SUPPORTED:
         await update.effective_message.reply_text(
             "Couldn't auto-detect this key's provider. Run /key again with the key, "
