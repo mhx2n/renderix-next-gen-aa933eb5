@@ -2954,6 +2954,7 @@ OWNER_EXTRA = [
     BotCommand("users",      "Active user count"),
     BotCommand("announce",   "Broadcast to all users"),
     BotCommand("setchannel", "Set force-join channel"),
+    BotCommand("forcejoin",  "Toggle force-join on/off"),
     BotCommand("ban",        "Ban a user id"),
     BotCommand("unban",      "Unban a user id"),
     BotCommand("live",       "Toggle live response"),
