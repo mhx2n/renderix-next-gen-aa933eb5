@@ -2877,7 +2877,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_owner(uid):
             oalias = {
                 "owner": cmd_owner, "stats": cmd_stats, "logs": cmd_logs,
-                "users": cmd_users, "setchannel": cmd_setchannel,
+                "users": cmd_users, "setchannel": cmd_setchannel, "forcejoin": cmd_forcejoin,
                 "ban": cmd_ban, "unban": cmd_unban, "announce": cmd_announce,
                 "live": cmd_live, "speak": cmd_speak, "grant": cmd_grant, "revoke": cmd_revoke,
             }
