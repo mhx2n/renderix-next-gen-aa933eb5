@@ -44,6 +44,11 @@ def _detect(key: str) -> str:
     if k.startswith("nvapi-"): return "nvidia"
     if k.startswith("ds-") or "deepseek" in k.lower(): return "deepseek"
     if k.startswith("sk-proj-"): return "openai"
+    # Well-known third-party OpenAI-compatible aggregators
+    if k.startswith(("sk-zy-", "sk-zj-", "sk-shuttle-", "sk-electron-",
+                     "sk-naga-", "sk-pawan-", "sk-aiml-", "sk-aimlapi-",
+                     "sk-helix-", "sk-shard-")):
+        return "third_party"
     # sk-... is ambiguous (OpenAI / DeepSeek / Mistral / Fireworks / Perplexity / etc.)
     if k.startswith("sk-"): return "ambiguous_sk"
     if k.startswith("co-"): return "cohere"
@@ -219,10 +224,72 @@ _HANDLERS["perplexity"] = _perplexity
 _HANDLERS["fireworks"] = _fireworks
 _HANDLERS["nvidia"] = _nvidia
 
+# Known free / public OpenAI-compatible third-party aggregators.
+# (name, base_url). Probed when a key looks like a proxy key (sk-zy-…, etc.)
+# or as a last-resort fallback for any unrecognised sk-… key.
+_THIRD_PARTY_BASES: list[tuple[str, str]] = [
+    ("Zukijourney",  "https://api.zukijourney.com/v1"),
+    ("ElectronHub",  "https://api.electronhub.ai/v1"),
+    ("ShuttleAI",    "https://api.shuttleai.com/v1"),
+    ("NagaAI",       "https://api.naga.ac/v1"),
+    ("Pawan",        "https://api.pawan.krd/cosmosrp/v1"),
+    ("AIMLAPI",      "https://api.aimlapi.com/v1"),
+    ("HelixMind",    "https://helixmind.online/v1"),
+    ("ShardAI",      "https://api.shard-ai.xyz/v1"),
+    ("Zanity",       "https://api.zanity.xyz/v1"),
+    ("Voidless",     "https://api.voidless.ru/v1"),
+]
+
+
+async def _third_party(session, key):
+    """Probe known OpenAI-compatible aggregator endpoints.
+
+    A key is considered valid for an endpoint when /v1/models returns 200
+    with the supplied Bearer token. The first matching base wins.
+    """
+    last_err = None
+    for name, base in _THIRD_PARTY_BASES:
+        s, data, _ = await _fetch_json(
+            session, "GET", f"{base}/models",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        if s == 200:
+            raw = data.get("data", data) if isinstance(data, dict) else data
+            ids = []
+            if isinstance(raw, list):
+                for m in raw:
+                    if isinstance(m, dict):
+                        mid = m.get("id") or m.get("name")
+                        if mid:
+                            ids.append(mid)
+                    elif isinstance(m, str):
+                        ids.append(m)
+            return {
+                "provider": f"Third-party · {name}",
+                "kind": "third_party",
+                "base": base,
+                "valid": True,
+                "models": ids[:200],
+                "limits": {"endpoint": base},
+            }
+        if s in (401, 403):
+            last_err = {"status": s, "endpoint": base, "body": data}
+    return {
+        "provider": "Third-party proxy",
+        "kind": "third_party",
+        "valid": False,
+        "status": (last_err or {}).get("status"),
+        "error": last_err or {"reason": "no aggregator accepted this key"},
+    }
+
+
+_HANDLERS["third_party"] = _third_party
+
 # Probe order when key prefix is ambiguous or unknown
 _PROBE_ORDER = [
     "openai", "deepseek", "mistral", "groq", "together", "fireworks",
-    "perplexity", "xai", "anthropic", "openrouter", "cohere", "nvidia", "gemini",
+    "perplexity", "xai", "anthropic", "openrouter", "cohere", "nvidia",
+    "gemini", "third_party",
 ]
 
 
@@ -261,12 +328,14 @@ async def inspect_key(key: str) -> dict:
         return await _probe_all(session, key)
 
 
-async def try_model(key: str, model: str, prompt: str, kind: str | None = None) -> str:
+async def try_model(key: str, model: str, prompt: str,
+                    kind: str | None = None, base: str | None = None) -> str:
     """Call a model.
 
     `kind` overrides prefix detection — important for `sk-...` keys that
     are ambiguous between OpenAI / DeepSeek / Mistral / Fireworks / etc.
     Callers (e.g. /tryke) should pass the kind resolved during /key.
+    `base` overrides the default endpoint (used for `third_party` keys).
     """
     provider = (kind or "").lower().strip() or _detect(key)
     if provider in ("ambiguous_sk", "unknown", ""):
@@ -320,7 +389,7 @@ async def try_model(key: str, model: str, prompt: str, kind: str | None = None) 
             return str(content)
 
         # OpenAI-compatible (openai, groq, openrouter, deepseek, xai, together, cohere v2 compat)
-        base = {
+        endpoint = base or {
             "openai": "https://api.openai.com/v1",
             "groq": "https://api.groq.com/openai/v1",
             "openrouter": "https://openrouter.ai/api/v1",
@@ -332,7 +401,7 @@ async def try_model(key: str, model: str, prompt: str, kind: str | None = None) 
             "fireworks": "https://api.fireworks.ai/inference/v1",
             "nvidia": "https://integrate.api.nvidia.com/v1",
         }.get(provider, "https://api.openai.com/v1")
-        s, data, _ = await _fetch_json(session, "POST", f"{base}/chat/completions",
+        s, data, _ = await _fetch_json(session, "POST", f"{endpoint}/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 512})
         if s != 200:

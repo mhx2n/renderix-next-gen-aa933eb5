@@ -41,6 +41,7 @@ _HISTORY: dict = defaultdict(list)
 _PENDING_KEY: dict = {}     # user_id -> last inspected api key
 _PENDING_KIND: dict = {}    # user_id -> resolved provider kind ("openai", "cohere", ...)
 _PENDING_MODELS: dict = {}  # user_id -> {"provider":..., "models":[...], "limits":{...}}
+_PENDING_BASE: dict = {}    # user_id -> resolved base URL (third-party proxies)
 _AWAIT_INPUT: dict = {}     # user_id -> ("key"|"download"|"tryke"|"announce"|"speak_to"|"grant"|"revoke")
 _DOWNLOAD_SEM = asyncio.Semaphore(1)  # keep free hosting stable: one download at a time
 _UPLOAD_SEM = asyncio.Semaphore(2)    # uploads can run in parallel for better throughput
@@ -127,6 +128,12 @@ async def _send_force_join_warning(update: Update, context: ContextTypes.DEFAULT
 
 async def force_join_ok(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     from . import config as cfg
+    # Owner kill-switch: when disabled, never block and never warn.
+    try:
+        if (await db.get_setting("force_join_enabled", "1")) == "0":
+            return True
+    except Exception:
+        pass
     channel = cfg.FORCE_JOIN_CHANNEL or FORCE_JOIN_CHANNEL
     if not channel:
         return True
@@ -1224,6 +1231,15 @@ async def _do_inspect(update: Update, key: str):
             _PENDING_KIND[update.effective_user.id] = (info.get("kind") or "").lower()
         except Exception:
             pass
+        # cache resolved base URL (third-party aggregators expose this)
+        try:
+            b = info.get("base") or (info.get("limits", {}) or {}).get("endpoint")
+            if b:
+                _PENDING_BASE[update.effective_user.id] = b
+            else:
+                _PENDING_BASE.pop(update.effective_user.id, None)
+        except Exception:
+            pass
         models = info.get("models", [])
         limits = info.get("limits", {})
         uid = update.effective_user.id
@@ -1299,7 +1315,10 @@ async def cmd_tryke(update: Update, context: ContextTypes.DEFAULT_TYPE):
     placeholder = await update.effective_message.reply_text(f"Calling {model}...")
     try:
         kind = _PENDING_KIND.get(update.effective_user.id)
-        out = await asyncio.wait_for(try_model(key, model, prompt, kind=kind), timeout=120)
+        base = _PENDING_BASE.get(update.effective_user.id)
+        out = await asyncio.wait_for(
+            try_model(key, model, prompt, kind=kind, base=base), timeout=120
+        )
         await stream_edit(placeholder, f"<b>{escape_html(model)}</b>\n\n{format_ai_answer(out)}")
     except Exception as e:
         msg = str(e)
@@ -1581,6 +1600,25 @@ async def cmd_setchannel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import bot.config as cfg
     cfg.FORCE_JOIN_CHANNEL = val
     await update.effective_message.reply_text(f"Force-join channel: {val or '(disabled)'}")
+
+
+async def cmd_forcejoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner: turn the force-join warning on/off without losing the channel."""
+    if not await _owner_only(update): return
+    cur = (await db.get_setting("force_join_enabled", "1")) != "0"
+    arg = (context.args[0].lower() if context.args else "").strip()
+    if arg in ("on", "1", "enable", "enabled"):
+        await db.set_setting("force_join_enabled", "1")
+        await update.effective_message.reply_text("✅ Force-join is now <b>ON</b>.", parse_mode=ParseMode.HTML)
+    elif arg in ("off", "0", "disable", "disabled"):
+        await db.set_setting("force_join_enabled", "0")
+        await update.effective_message.reply_text("🟡 Force-join is now <b>OFF</b>. Users won't be asked to join.", parse_mode=ParseMode.HTML)
+    else:
+        await update.effective_message.reply_text(
+            f"Force-join is currently <b>{'ON' if cur else 'OFF'}</b>.\n"
+            f"Usage: <code>/forcejoin on</code> | <code>/forcejoin off</code>",
+            parse_mode=ParseMode.HTML,
+        )
 
 
 async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1868,7 +1906,7 @@ _RESERVED_CMDS = {
     "users","setchannel","ban","unban","announce","cancel","live","speak","grant",
     "revoke","restart","mkey","mlimit","addmodel","addprovider","delprovider",
     "providers","en","de","text","wc","spell","gra","syn","prn","bg","enh","res",
-    "short","style","tr","ocr","info","m2t","time","vnote","top","convert",
+    "short","style","tr","ocr","info","m2t","time","vnote","top","convert","forcejoin",
 }
 
 _PROVIDER_BASE_URLS = {
@@ -1923,7 +1961,7 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     from .keycheck import _detect, inspect_key
     kind = (_PENDING_KIND.get(uid) or "").lower()
-    _SUPPORTED = set(_PROVIDER_BASE_URLS) | {"anthropic", "gemini"}
+    _SUPPORTED = set(_PROVIDER_BASE_URLS) | {"anthropic", "gemini", "third_party"}
     if not kind or kind not in _SUPPORTED:
         # detection fallback: prefix sniff
         guess = _detect(key)
@@ -1936,9 +1974,20 @@ async def cmd_addmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if info.get("valid"):
                     kind = (info.get("kind") or "").lower()
                     _PENDING_KIND[uid] = kind
+                    b = info.get("base") or (info.get("limits", {}) or {}).get("endpoint")
+                    if b:
+                        _PENDING_BASE[uid] = b
             except Exception:
                 pass
     base_url = _PROVIDER_BASE_URLS.get(kind)  # None for anthropic/gemini (handled below)
+    if kind == "third_party":
+        base_url = _PENDING_BASE.get(uid)
+        if not base_url:
+            await update.effective_message.reply_text(
+                "Third-party proxy key found but its endpoint isn't cached. "
+                "Run /key <API_KEY> again, then retry /addmodel."
+            )
+            return
     if kind not in _SUPPORTED:
         await update.effective_message.reply_text(
             "Couldn't auto-detect this key's provider. Run /key again with the key, "
@@ -2828,7 +2877,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_owner(uid):
             oalias = {
                 "owner": cmd_owner, "stats": cmd_stats, "logs": cmd_logs,
-                "users": cmd_users, "setchannel": cmd_setchannel,
+                "users": cmd_users, "setchannel": cmd_setchannel, "forcejoin": cmd_forcejoin,
                 "ban": cmd_ban, "unban": cmd_unban, "announce": cmd_announce,
                 "live": cmd_live, "speak": cmd_speak, "grant": cmd_grant, "revoke": cmd_revoke,
             }
@@ -2905,6 +2954,7 @@ OWNER_EXTRA = [
     BotCommand("users",      "Active user count"),
     BotCommand("announce",   "Broadcast to all users"),
     BotCommand("setchannel", "Set force-join channel"),
+    BotCommand("forcejoin",  "Toggle force-join on/off"),
     BotCommand("ban",        "Ban a user id"),
     BotCommand("unban",      "Unban a user id"),
     BotCommand("live",       "Toggle live response"),
@@ -3153,7 +3203,7 @@ def register_handlers(app: Application):
         import re as _re
         m = _re.match(r"/([A-Za-z0-9_]+)", text)
         cmd = (m.group(1).lower() if m else "")
-        if cmd in ("start", "setchannel"):
+        if cmd in ("start", "setchannel", "forcejoin"):
             return
         if not await force_join_ok(update, context):
             raise ApplicationHandlerStop
@@ -3188,6 +3238,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("logs",       cmd_logs))
     app.add_handler(CommandHandler("users",      cmd_users))
     app.add_handler(CommandHandler("setchannel", cmd_setchannel))
+    app.add_handler(CommandHandler("forcejoin",  cmd_forcejoin))
     app.add_handler(CommandHandler("ban",        cmd_ban))
     app.add_handler(CommandHandler("unban",      cmd_unban))
     app.add_handler(CommandHandler("announce",   cmd_announce))
