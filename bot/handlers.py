@@ -3237,6 +3237,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("logs",       cmd_logs))
     app.add_handler(CommandHandler("users",      cmd_users))
     app.add_handler(CommandHandler("setchannel", cmd_setchannel))
+    app.add_handler(CommandHandler("forcejoin",  cmd_forcejoin))
     app.add_handler(CommandHandler("ban",        cmd_ban))
     app.add_handler(CommandHandler("unban",      cmd_unban))
     app.add_handler(CommandHandler("announce",   cmd_announce))
